@@ -120,6 +120,16 @@ class Workflow:
             for key,checkpoint in self.db.execute("SELECT id,checkpoint FROM inbox WHERE state='processed'").fetchall():
                 self.client.call('notifications.ack',consumer_id=self.consumer_id,delivery_id=key,checkpoint_id=checkpoint)
                 with self.db:self.db.execute("UPDATE inbox SET state='acked' WHERE id=?",(key,))
+            # Receipts remain the authority even when a failed producer emitted no SMS.
+            task_statuses={}; failures={}
+            for task_id in (self.dependency['producer_task_id'],self.task['id']):
+                try:receipt=self.client.call('receipts.get',task_id=task_id)
+                except ControlError as e:
+                    if e.code!='not_found':raise
+                    task_statuses[task_id]='missing';continue
+                task_statuses[task_id]=receipt['status']
+                if receipt.get('failure'):failures[task_id]=receipt['failure']
             return {'done':bool(snapshot.values.get('done')), 'next':list(snapshot.next),
+                    'task_statuses':task_statuses,'failures':failures,
                     'inbox':dict(self.db.execute('SELECT state,COUNT(*) FROM inbox GROUP BY state')),
                     'blocked_reasons':[r[0] for r in self.db.execute("SELECT DISTINCT reason FROM inbox WHERE state='pending' AND reason!=''")]}

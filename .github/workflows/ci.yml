@@ -15,6 +15,7 @@ jobs:
       - run: uv run --frozen python -m unittest discover -s tests -p test_contracts.py -v
       - run: uv run --frozen python -m unittest discover -s tests -p test_observability.py -v
       - run: uv run --frozen python -m unittest discover -s tests -p test_metrics.py -v
+      - run: uv run --frozen python -m unittest discover -s tests -p test_workflow_failure_status.py -v
   integration:
     # Separate private repositories require an explicitly configured read credential.
     # A skipped job is not evidence of a passing integration test.
@@ -25,7 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: shakystar/role-runtime
-          ref: 19e41795ab4ea63005f60c00b92c126e25a79d4f
+          ref: bba4f3a6afc9b4ebc6adaf1c010feeb5a5434d2b
           path: runtime-source
           token: ${{ secrets.ROLE_RUNTIME_READ_TOKEN }}
           persist-credentials: false
@@ -40,7 +41,7 @@ jobs:
           go build -o ../runtime-bridge ./cmd/runtime-bridge
           go build -o ../workflow-probe ./experiments/workflowprobe
           go build -o ../runtime-workflow ./cmd/runtime-workflow
-          go test -race ./internal/control ./internal/lifecycle
+          go test -race ./internal/control ./internal/lifecycle ./internal/workflowmodel
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.11'

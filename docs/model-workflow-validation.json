@@ -1,0 +1,74 @@
+{
+  "done": true,
+  "next": [],
+  "task_statuses": {
+    "producer": "completed",
+    "consumer": "completed"
+  },
+  "failures": {},
+  "inbox": {
+    "acked": 1
+  },
+  "blocked_reasons": [],
+  "metrics": {
+    "cache_deliveries": 1,
+    "complete": true,
+    "completed_tasks": 2,
+    "conflicts": 0,
+    "cost": null,
+    "cost_reason": "usage_and_price_basis_unavailable",
+    "coverage": "observed_events_only",
+    "duration_measured_attempts": 2,
+    "execution_attempts": 2,
+    "execution_duration_ns": 49649073452,
+    "failed_tasks": 0,
+    "graph_wait_duration_ns": null,
+    "graph_wait_duration_reason": "not_recorded",
+    "issues": [],
+    "logical_tasks": 2,
+    "startup_retries": 1,
+    "statuses": {
+      "consumer": "completed",
+      "producer": "completed"
+    },
+    "usage": null,
+    "usage_reason": "per_attempt_usage_not_recorded",
+    "waiting_duration_complete": true,
+    "waiting_duration_ns": 342735182,
+    "waiting_duration_scope": "runtime_queue_and_suspended_segments"
+  },
+  "verification": {
+    "model_completions": 2,
+    "span_count": 4,
+    "trace_id": "72282c69b02ebdd74489ed3b46f3f26c",
+    "review_verdict": "accept",
+    "review_matches_document": true
+  },
+  "restart": {
+    "status_spans_artifacts_unchanged": true,
+    "new_model_calls": 0
+  },
+  "langfuse": {
+    "trace_id": "72282c69b02ebdd74489ed3b46f3f26c",
+    "observations": 4,
+    "exact_span_ids": true,
+    "parentage_verified": true,
+    "payloads_absent": true,
+    "ended": true
+  },
+  "runtime_revision": "bba4f3a6afc9b4ebc6adaf1c010feeb5a5434d2b",
+  "evidence_scope": "live Codex with fixed synthetic requirements",
+  "source_state": "development working tree; Python implementation accompanies this report",
+  "initial_doctor": "workspace_routing_timeout",
+  "process_reused_across_roles": true,
+  "tests": {
+    "python": 39,
+    "acceptance": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0
+    },
+    "go_race": "passed",
+    "go_vet": "passed"
+  }
+}

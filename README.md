@@ -65,3 +65,7 @@ Next implementation: [workflow/metrics v1 preparation](docs/planning/workflow-me
 ## Owner-process workflow and metrics
 
 [Implementation and runbook](docs/workflow-implementation.md): a separate workflow CLI now connects SMS, durable inbox, graph checkpoints and runtime receipts through the owning Go process. Independent metrics and a 19-case acceptance runner are included. The new host uses explicit synthetic tasks; production/model-backed rollout and token/cost accounting remain separate.
+
+## Model-backed workflow slice
+
+The same SMS/control/checkpoint path now supports a fixed Codex writer → reviewer through Go. [Implementation and actual-model verification](docs/model-workflow-validation.md) distinguish synthetic acceptance tests, live model execution, restart reuse and local Langfuse readback. Use `examples/model-document-workflow.json`; fixture mode remains the default.
