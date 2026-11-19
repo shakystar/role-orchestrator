@@ -1,0 +1,11 @@
+{
+  "consumer_id": "graph",
+  "dependency": {
+    "sender": {"project": "pipeline", "role": "producer", "version": "v1", "instance": "main"},
+    "recipient": {"project": "pipeline", "role": "consumer", "version": "v1", "instance": "main"},
+    "correlation": "document-v1",
+    "producer_task_id": "producer",
+    "artifact_version": "v1"
+  },
+  "consumer_task": {"id": "consumer", "project": "pipeline", "role": "consumer", "version": "v1", "instance": "main", "input": "synthetic"}
+}
