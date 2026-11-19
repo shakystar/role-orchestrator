@@ -74,3 +74,5 @@ P0/P1/P2는 구현 착수 승인이 아니라 의존성과 검증 순서다. sou
 SMS/SQLite 연결의 5개 합성 검증은 통과했다. 이는 실제 동시 파이프라인이나 지표 집계기의 완성을 뜻하지 않는다. 실행 중 runtime 조회 API, 영속 이벤트·사용량 원장, 중복 제거 집계가 다음 구현 범위다. 자세한 검증 결과와 부족한 인터페이스는 [사전 검증](../workflow-feasibility.md)에 기록한다.
 
 구현 준비 산출물: [SMS·집계 v1 경계와 수용 기준](workflow-metrics-v1.md). control API → inbox/graph 재개 → event 원장/집계 → 평가 runner 순서와 19개 수용 사례를 정의했다. API·원장 구현 완료를 뜻하지 않는다.
+
+첫 A~D 구현과 19개 합성 수용 사례가 완료됐다. [구현 범위·운영 명령·남은 제한](../workflow-implementation.md), [실행 보고서](../workflow-evaluation.json)를 참조한다. 비용·토큰 원장, 모든 실제 모델 진입점 적용, 동적 기획 및 내용 수준 계약은 여전히 후속 범위다.

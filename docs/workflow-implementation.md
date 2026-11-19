@@ -78,9 +78,12 @@ are deleted or retried. Use fresh state paths for new runs; preserve uncertain r
 ```
 
 The 19 case specifications remain in `contracts/workflow-metrics-cases.json`.
-The first complete development run passed 19, failed 0, skipped 0. Its raw report is
-ignored under artifacts; a final source-bound report is recorded separately after
-verification. Projection recovery injects a filesystem failure then reopens the store;
+The final source-bound run passed **19, failed 0, skipped 0**; see
+[the machine-readable report](workflow-evaluation.json). It tested orchestrator
+`b153741ebf8d43b913b53960dfcce60437d7df5c` and the paired runtime revision above,
+with no tracked-file changes. The runtime workspace had an unrelated untracked research
+document, retained untouched; this explains its workspace dirty flag. The earlier
+development run also passed 19/19. Projection recovery injects a filesystem failure then reopens the store;
 graph checkpoint/inbox/ack crash tests actually terminate the Python subprocess.
 Langfuse isolation combines the independent no-export workflow path with the existing
 failing-exporter/real-bridge regression; it does not claim a live Langfuse outage test.
@@ -102,3 +105,7 @@ changes. No new dependency, Docker image, service, repository or hosted resource
   not prevent actual disk I/O failure.
 - One owner per graph/runtime; no exactly-once guarantee for arbitrary external effects.
 - Content-level task contracts, dynamic teams and DB memory paging remain deferred.
+
+## Verification status
+
+Go whole-repository race tests passed during implementation; affected engine/lifecycle/control packages and targeted crash/capacity tests passed again after final hardening. Go vet passed. Python metrics unit tests passed, and the final acceptance run passed all 19 cases. Hosted default CI for `b153741` passed. Private cross-repository hosted integration remains opt-in; local integration evidence is recorded separately and a skipped hosted job is not a pass. No live model calls were made in this slice.

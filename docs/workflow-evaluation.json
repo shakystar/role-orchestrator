@@ -1,0 +1,306 @@
+{
+  "schema_version": 1,
+  "mode": "synthetic",
+  "model_calls": 0,
+  "python": "3.11.9",
+  "orchestrator_revision": "b153741ebf8d43b913b53960dfcce60437d7df5c",
+  "runtime_revision": "19e41795ab4ea63005f60c00b92c126e25a79d4f",
+  "orchestrator_dirty": false,
+  "runtime_dirty": true,
+  "orchestrator_tracked_dirty": false,
+  "runtime_tracked_dirty": false,
+  "elapsed_seconds": 55.343,
+  "cases": [
+    {
+      "id": "sms_normal",
+      "component": "workflow",
+      "stimuli": [
+        "producer_completed",
+        "valid_artifact",
+        "matching_sms"
+      ],
+      "expected": "consumer_completes_once",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_sms_normal"
+      ],
+      "failures": [],
+      "elapsed_seconds": 4.468
+    },
+    {
+      "id": "sms_duplicate",
+      "component": "workflow",
+      "stimuli": [
+        "matching_sms",
+        "same_sms_again"
+      ],
+      "expected": "one_logical_resume",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_sms_duplicate"
+      ],
+      "failures": [],
+      "elapsed_seconds": 5.762
+    },
+    {
+      "id": "sms_early",
+      "component": "workflow",
+      "stimuli": [
+        "sms_before_receipt",
+        "receipt_later"
+      ],
+      "expected": "wait_then_resume_once",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_sms_early"
+      ],
+      "failures": [],
+      "elapsed_seconds": 4.861
+    },
+    {
+      "id": "sms_scope",
+      "component": "workflow",
+      "stimuli": [
+        "wrong_project_or_role_version_or_correlation"
+      ],
+      "expected": "no_resume",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_sms_scope"
+      ],
+      "failures": [],
+      "elapsed_seconds": 3.759
+    },
+    {
+      "id": "artifact_invalid",
+      "component": "workflow",
+      "stimuli": [
+        "missing_or_hash_mismatch"
+      ],
+      "expected": "wait_with_reason",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_artifact_invalid"
+      ],
+      "failures": [],
+      "elapsed_seconds": 2.222
+    },
+    {
+      "id": "producer_uncertain",
+      "component": "workflow",
+      "stimuli": [
+        "uncertain_receipt",
+        "matching_sms"
+      ],
+      "expected": "no_resume",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_producer_uncertain"
+      ],
+      "failures": [],
+      "elapsed_seconds": 2.539
+    },
+    {
+      "id": "checkpoint_crash",
+      "component": "workflow",
+      "stimuli": [
+        "receipt_commit",
+        "exit_before_graph_checkpoint",
+        "restart"
+      ],
+      "expected": "receipt_reuse_no_new_attempt",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_checkpoint_crash"
+      ],
+      "failures": [],
+      "elapsed_seconds": 5.588
+    },
+    {
+      "id": "ack_crash",
+      "component": "workflow",
+      "stimuli": [
+        "graph_checkpoint_commit",
+        "exit_before_ack",
+        "restart"
+      ],
+      "expected": "ack_again_no_reexecution",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_ack_crash"
+      ],
+      "failures": [],
+      "elapsed_seconds": 4.7
+    },
+    {
+      "id": "inbox_crash",
+      "component": "workflow",
+      "stimuli": [
+        "inbox_insert",
+        "exit_before_cursor_commit",
+        "restart"
+      ],
+      "expected": "no_lost_notification",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_inbox_crash",
+        "test_metrics.MetricsTests.test_transaction_rollback"
+      ],
+      "failures": [],
+      "elapsed_seconds": 5.048
+    },
+    {
+      "id": "active_query",
+      "component": "control",
+      "stimuli": [
+        "long_fixture_execution",
+        "bounded_query"
+      ],
+      "expected": "query_returns_without_waiting_for_task",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_active_query"
+      ],
+      "failures": [],
+      "elapsed_seconds": 0.674
+    },
+    {
+      "id": "event_duplicate",
+      "component": "metrics",
+      "stimuli": [
+        "same_event_twice"
+      ],
+      "expected": "unchanged_aggregates",
+      "status": "passed",
+      "checks": [
+        "test_metrics.MetricsTests.test_duplicate"
+      ],
+      "failures": [],
+      "elapsed_seconds": 0.011
+    },
+    {
+      "id": "event_conflict",
+      "component": "metrics",
+      "stimuli": [
+        "same_event_id_different_payload"
+      ],
+      "expected": "conflict_no_overwrite",
+      "status": "passed",
+      "checks": [
+        "test_metrics.MetricsTests.test_conflict"
+      ],
+      "failures": [],
+      "elapsed_seconds": 0.01
+    },
+    {
+      "id": "event_reordered",
+      "component": "metrics",
+      "stimuli": [
+        "finished_before_started",
+        "started_later"
+      ],
+      "expected": "terminal_preserved_gap_resolved",
+      "status": "passed",
+      "checks": [
+        "test_metrics.MetricsTests.test_reordered"
+      ],
+      "failures": [],
+      "elapsed_seconds": 0.009
+    },
+    {
+      "id": "event_gap",
+      "component": "metrics",
+      "stimuli": [
+        "revision_gap"
+      ],
+      "expected": "incomplete_not_zero",
+      "status": "passed",
+      "checks": [
+        "test_metrics.MetricsTests.test_gap"
+      ],
+      "failures": [],
+      "elapsed_seconds": 0.009
+    },
+    {
+      "id": "event_projection_crash",
+      "component": "metrics",
+      "stimuli": [
+        "intent_commit",
+        "exit_during_projection",
+        "restart"
+      ],
+      "expected": "same_event_id_no_loss_or_double_count",
+      "status": "passed",
+      "checks": [
+        "TestLifecycleIntentRecovery",
+        "TestLifecycleProjectionIdempotence"
+      ],
+      "failures": [],
+      "elapsed_seconds": 3.413
+    },
+    {
+      "id": "rebuild",
+      "component": "metrics",
+      "stimuli": [
+        "ingest",
+        "discard_derived_db",
+        "replay_retained_events"
+      ],
+      "expected": "equal_aggregates_and_completeness",
+      "status": "passed",
+      "checks": [
+        "test_metrics.MetricsTests.test_rebuild",
+        "test_live_workflow.LiveWorkflowTests.test_restart_and_rebuild"
+      ],
+      "failures": [],
+      "elapsed_seconds": 4.825
+    },
+    {
+      "id": "capacity",
+      "component": "control",
+      "stimuli": [
+        "ledger_full"
+      ],
+      "expected": "new_work_not_accepted_no_silent_truncation",
+      "status": "passed",
+      "checks": [
+        "TestLifecycleCapacityReservesCompletion"
+      ],
+      "failures": [],
+      "elapsed_seconds": 2.213
+    },
+    {
+      "id": "langfuse_down",
+      "component": "observability",
+      "stimuli": [
+        "export_unavailable"
+      ],
+      "expected": "workflow_and_aggregates_unchanged_export_failure_visible",
+      "status": "passed",
+      "checks": [
+        "test_live_workflow.LiveWorkflowTests.test_langfuse_down",
+        "test_bridge.FailureBoundaryTests.test_export_failure_and_failed_task_replay"
+      ],
+      "failures": [],
+      "elapsed_seconds": 5.138
+    },
+    {
+      "id": "usage_missing",
+      "component": "metrics",
+      "stimuli": [
+        "no_usage_record"
+      ],
+      "expected": "usage_and_cost_null_with_reason",
+      "status": "passed",
+      "checks": [
+        "test_metrics.MetricsTests.test_usage_missing"
+      ],
+      "failures": [],
+      "elapsed_seconds": 0.009
+    }
+  ],
+  "limitations": [
+    "No live model quality or cost evaluation.",
+    "Projection recovery uses injected filesystem failure and store reopen; Python checkpoint crash cases use process exit."
+  ]
+}
