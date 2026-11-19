@@ -3,7 +3,19 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  graph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.11'
+      - run: uv sync --frozen
+      - run: uv run --frozen python -m unittest discover -s tests -p test_graph.py -v
   integration:
+    # Separate private repositories require an explicitly configured read credential.
+    # A skipped job is not evidence of a passing integration test.
+    if: vars.ROLE_RUNTIME_INTEGRATION == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,6 +24,8 @@ jobs:
           repository: shakystar/role-runtime
           ref: 94bf2e798fc53736babb1b6974f5a84cd7cee00b
           path: runtime-source
+          token: ${{ secrets.ROLE_RUNTIME_READ_TOKEN }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.11'

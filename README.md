@@ -41,3 +41,7 @@ A state directory owns one experiment and fixed configuration. `start` refuses a
 - Returned evidence IDs are checked for membership, not truth or entailment. A model can still make a poor decision.
 
 See [protocol](docs/protocol.md), [validation](docs/validation.md), and [dependencies](THIRD_PARTY.md). Formal adoption and detailed product planning remain a separate decision after this pilot.
+
+## CI access
+
+These repositories are currently private. The default CI runs Python graph tests; cross-repository Go integration is opt-in because Actions tokens are repository-scoped. See [CI scope and access requirements](docs/validation.md#hosted-ci-scope). A skipped integration job does not count as a passing integration check; local integration and live-model results are recorded separately.

@@ -36,3 +36,9 @@ The first live graph (`codex-01`) completed all four tasks. A subsequent cached-
 This pilot uses three roles, one worker, one permitted revision, a local SQLite checkpoint, and a sequential bridge. It does not validate general dynamic planning, concurrent scheduling, SMS-driven graph resumption, crash recovery of ambiguous external effects, cost estimation, research methodology, or memory paging. The Go task receipt and Python checkpoint are separate stores; no exactly-once side-effect guarantee is made.
 
 Formal planning should begin only if this boundary is accepted. The next design questions would be versioned task/event contracts, SMS-to-graph wakeups, evidence/decision records and budget policy. They are intentionally not implemented in this experiment.
+
+## Hosted CI scope
+
+The initial [CI run](https://github.com/shakystar/role-orchestrator/actions/runs/44457505973) failed while checking out role-runtime, before any tests ran. Both repositories are private; the default Actions token for role-orchestrator cannot read role-runtime. Repository visibility and account credentials were not changed.
+
+CI now always runs the three Python graph tests. The real Go bridge integration job is explicitly opt-in: configure a narrowly scoped `ROLE_RUNTIME_READ_TOKEN` secret with read access to role-runtime and set `ROLE_RUNTIME_INTEGRATION=true` as a repository variable. Until then, that job is skipped, **not passed**. All four tests including the real bridge were run locally. No hosted live Codex execution is configured.
