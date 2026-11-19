@@ -49,3 +49,7 @@ These repositories are currently private. The default CI runs Python graph tests
 ## Opportunity and planning stage
 
 [기회 검토·후보 백로그](docs/planning/opportunities.md)에 관측 facade/Langfuse, 작업 계약, 제한된 후속 작업 제안, 컨텍스트 분리, 결과물 참조, 평가셋, 기억·스킬의 설계 후보를 등록했다. [관측 경계 초안](docs/planning/observability.md)과 [오픈소스 추출 근거](docs/planning/sources.md)를 함께 따른다. 문서/일부 소스 조사 결과이며 구현·정식 채택 완료를 뜻하지 않는다.
+
+## Local observability feasibility probe
+
+[Local Langfuse Docker runbook](infra/langfuse/README.md) and [validation record](docs/langfuse-validation.md): actual fixture graph/Go calls can be exported as Python client spans and read back from Langfuse v4. This optional probe does not change the default CLI or implement Go-internal tracing, real model costs, or production observability.

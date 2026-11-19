@@ -1,6 +1,6 @@
 # O-01: 관측 facade와 Langfuse 연동 기획
 
-상태: 제안, 미구현. LangGraph 흐름 제어와 Go runtime 실행의 경계를 유지한다. 관측 처리는 독립 전송 경로이며 업무 워크플로의 완료 조건이 아니다.
+상태: 전체 계약은 제안. 로컬 수집·조회와 Python client span의 일부 기술 검증만 [별도 파일럿](../langfuse-validation.md)으로 완료했으며, 아래 전체 기능은 미구현. LangGraph 흐름 제어와 Go runtime 실행의 경계를 유지한다. 관측 처리는 독립 전송 경로이며 업무 워크플로의 완료 조건이 아니다.
 
 ```text
 LangGraph ── 작업 요청 ── Go runtime ── codex-adapter

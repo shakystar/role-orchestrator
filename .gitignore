@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 artifacts/
 .uv-cache/
+infra/langfuse/.env

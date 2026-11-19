@@ -1,0 +1,47 @@
+{
+  "langfuse-probe-03": {
+    "trace_id": "d8a0eb84e323bdec71710fd48c786182",
+    "completed_tasks": 4,
+    "model_calls": 0,
+    "transport": {
+      "ended": 5,
+      "exported": 5,
+      "failed": 0,
+      "flush_completed": true,
+      "unexported": 0
+    },
+    "readback": true,
+    "parentage_verified": true,
+    "payloads_absent": true,
+    "observations": 5
+  },
+  "langfuse-outage-01": {
+    "trace_id": "78123b6e7dc0f23e5b12b32e68141961",
+    "completed_tasks": 4,
+    "model_calls": 0,
+    "transport": {
+      "ended": 5,
+      "exported": 0,
+      "failed": 5,
+      "flush_completed": true,
+      "unexported": 0
+    },
+    "readback": false
+  },
+  "langfuse-recovery-01": {
+    "trace_id": "ae45baf7c5a44f322ef3ec0640764a4f",
+    "completed_tasks": 4,
+    "model_calls": 0,
+    "transport": {
+      "ended": 5,
+      "exported": 5,
+      "failed": 0,
+      "flush_completed": true,
+      "unexported": 0
+    },
+    "readback": true,
+    "parentage_verified": true,
+    "payloads_absent": true,
+    "observations": 5
+  }
+}

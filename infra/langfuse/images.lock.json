@@ -1,0 +1,26 @@
+[
+  {
+    "image": "docker.langfuse.com/langfuse/langfuse-worker:4.82.0",
+    "digest": "sha256:f06ca02f2dd600f55be3611184e0ade597b257b5413b8c60a1ad6b2bb06b8125"
+  },
+  {
+    "image": "docker.langfuse.com/langfuse/langfuse:4.82.0",
+    "digest": "sha256:e7fc2b170b29d522bb7e9b8881017cad8ac56212d785287e0f97811250d146a2"
+  },
+  {
+    "image": "postgres:17-alpine",
+    "digest": "sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32"
+  },
+  {
+    "image": "redis:7.4-alpine",
+    "digest": "sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"
+  },
+  {
+    "image": "clickhouse/clickhouse-server:26.3.62.3",
+    "digest": "sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a"
+  },
+  {
+    "image": "cgr.dev/chainguard/minio",
+    "digest": "sha256:16b824a0016ffad3dfa8b059755f83800aa42ca68fe86f1782cabd0c5a16d322"
+  }
+]
