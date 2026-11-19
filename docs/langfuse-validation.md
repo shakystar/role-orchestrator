@@ -25,3 +25,9 @@ Scope: technical feasibility of a local Docker receiver, bounded metadata-only O
 Python client RPC spans describe round-trip duration, not Go scheduler/model latency. Go-internal OTel propagation, cross-process trace continuation, real model usage/cost, cache telemetry deduplication, persistent export retry and sustained resource overhead are still pending. The graph's existing same-process checkpoint continuation is used in this probe; the previous separate-process graph-resume experiment remains a different result.
 
 LangGraph/Go receipts remain authoritative for execution. Langfuse is an asynchronous observational sink. SDK queue overflow can lose telemetry; counters expose this in tests after draining. No exactly-once telemetry or durable spool guarantee is made. Model costs are unknown/not applicable for this fixture experiment, not measured as a monetary zero.
+
+## Minimal live check — 2026-11-19
+
+One LangGraph node submitted exactly one synthetic acknowledgement task through the existing Go bridge to real Codex. One worker completed the task successfully. The Python RPC round trip took 5.898 seconds including harness setup; this is not model-only latency. Two spans (root + RPC client) were exported and independently read back from Langfuse, with correct parentage, end times and no input/output payloads. No retries or additional model tasks were run. See [metrics](langfuse-live-minimal-metrics.json).
+
+Token usage and cost remain null: the current bridge response does not expose usage. This check validates actual model-call observability at the client boundary only, not Go internal tracing or cost accuracy. Production execution code was unchanged.

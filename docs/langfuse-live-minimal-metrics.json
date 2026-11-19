@@ -1,0 +1,29 @@
+{
+  "model_calls": 1,
+  "task_succeeded": true,
+  "trace_id": "ec6092cb07590f5acf45b44039b7ed6f",
+  "observations": 2,
+  "parentage_verified": true,
+  "payloads_absent": true,
+  "transport": {
+    "ended": 2,
+    "exported": 2,
+    "failed": 0,
+    "flush_completed": true,
+    "unexported": 0
+  },
+  "rpc_seconds": 5.898,
+  "stats": {
+    "submitted": 1,
+    "succeeded": 1,
+    "failed": 0,
+    "rejected": 0,
+    "maxActive": 1,
+    "maxQueued": 1,
+    "workers": 1
+  },
+  "token_usage": null,
+  "estimated_cost": null,
+  "usage_limitation": "Bridge response does not expose token usage; no price or billing inferred.",
+  "timing_scope": "Python RPC round-trip including harness setup; not model-only latency."
+}
