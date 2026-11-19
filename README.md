@@ -55,3 +55,7 @@ These repositories are currently private. The default CI runs Python graph, cont
 [Local Langfuse Docker runbook](infra/langfuse/README.md) and [validation record](docs/langfuse-validation.md): actual fixture graph/Go calls can be exported as Python client spans and read back from Langfuse v4. The v1 bridge now propagates W3C trace context into Go request/execution spans. Default CLI runs keep bounded metadata-only local span logs; add `--telemetry-env infra/langfuse/.env` for optional loopback Langfuse export. Real model costs and production observability remain out of scope. See [contract/trace validation](docs/contract-trace-validation.md).
 
 Bridge v1 requires fresh state for old unversioned runs. Explicit legacy Go mode remains available in an isolated directory; no automatic receipt migration. See [protocol](docs/protocol.md) for identities, compatibility and recovery boundaries.
+
+## Workflow feasibility
+
+[SMS/checkpoint and measurement feasibility](docs/workflow-feasibility.md) records five synthetic restart, notification and artifact checks using the real Go store and LangGraph. This is an isolated experimental probe; the default CLI is still the fixed pilot. Production SMS wakeups and general metrics/usage aggregation remain to implement.
