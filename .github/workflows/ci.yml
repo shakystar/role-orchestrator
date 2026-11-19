@@ -12,6 +12,7 @@ jobs:
           python-version: '3.11'
       - run: uv sync --frozen
       - run: uv run --frozen python -m unittest discover -s tests -p test_graph.py -v
+      - run: uv run --frozen python -m unittest discover -s tests -p test_contracts.py -v
       - run: uv run --frozen python -m unittest discover -s tests -p test_observability.py -v
   integration:
     # Separate private repositories require an explicitly configured read credential.
@@ -23,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: shakystar/role-runtime
-          ref: 94bf2e798fc53736babb1b6974f5a84cd7cee00b
+          ref: 47eb03531097e925145682600d30cb96c1ac6f8e
           path: runtime-source
           token: ${{ secrets.ROLE_RUNTIME_READ_TOKEN }}
           persist-credentials: false

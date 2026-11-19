@@ -17,6 +17,7 @@ def main():
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--backend", choices=["fixture", "codex"], default="fixture")
     parser.add_argument("--codex", default="codex")
+    parser.add_argument("--telemetry-env", type=Path, help="optional local Langfuse env file; metadata only")
     args = parser.parse_args()
     state = args.state.resolve()
     state.mkdir(parents=True, exist_ok=True)
@@ -33,7 +34,7 @@ def main():
         try:
             with SqliteSaver.from_conn_string(str(state / "graph.sqlite")) as saver:
                 if args.command != "status":
-                    runtime = Runtime(manifest["runtime"], state, args.backend, args.codex)
+                    runtime = Runtime(manifest["runtime"], state, args.backend, args.codex, telemetry_env=args.telemetry_env)
                 graph = build(runtime, saver, args.backend)
                 config = {"configurable": {"thread_id": "pilot-v1"}, "recursion_limit": 16}
                 if args.command == "start":

@@ -44,7 +44,7 @@ See [protocol](docs/protocol.md), [validation](docs/validation.md), and [depende
 
 ## CI access
 
-These repositories are currently private. The default CI runs Python graph tests; cross-repository Go integration is opt-in because Actions tokens are repository-scoped. See [CI scope and access requirements](docs/validation.md#hosted-ci-scope). A skipped integration job does not count as a passing integration check; local integration and live-model results are recorded separately.
+These repositories are currently private. The default CI runs Python graph, contract and observability tests; cross-repository Go integration is opt-in because Actions tokens are repository-scoped. See [CI scope and access requirements](docs/validation.md#hosted-ci-scope). A skipped integration job does not count as a passing integration check; local integration and live-model results are recorded separately.
 
 ## Opportunity and planning stage
 
@@ -52,4 +52,6 @@ These repositories are currently private. The default CI runs Python graph tests
 
 ## Local observability feasibility probe
 
-[Local Langfuse Docker runbook](infra/langfuse/README.md) and [validation record](docs/langfuse-validation.md): actual fixture graph/Go calls can be exported as Python client spans and read back from Langfuse v4. This optional probe does not change the default CLI or implement Go-internal tracing, real model costs, or production observability.
+[Local Langfuse Docker runbook](infra/langfuse/README.md) and [validation record](docs/langfuse-validation.md): actual fixture graph/Go calls can be exported as Python client spans and read back from Langfuse v4. The v1 bridge now propagates W3C trace context into Go request/execution spans. Default CLI runs keep bounded metadata-only local span logs; add `--telemetry-env infra/langfuse/.env` for optional loopback Langfuse export. Real model costs and production observability remain out of scope. See [contract/trace validation](docs/contract-trace-validation.md).
+
+Bridge v1 requires fresh state for old unversioned runs. Explicit legacy Go mode remains available in an isolated directory; no automatic receipt migration. See [protocol](docs/protocol.md) for identities, compatibility and recovery boundaries.

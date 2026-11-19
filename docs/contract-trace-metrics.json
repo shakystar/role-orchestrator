@@ -1,0 +1,35 @@
+{
+  "date": "2026-11-19",
+  "records": [
+    {
+      "mode": "fixture-resume",
+      "run_id": "r-5c9433c113574c0a9bf8bf16ed207b01",
+      "trace_id": "4ffb984e5f87419e83f6d2774d3e71b8",
+      "observations": 17,
+      "runtime_executions": 4,
+      "runtime_requests": 5,
+      "cache_replay": true,
+      "cross_process_parentage": true,
+      "payloads_absent": true,
+      "model_calls": 0,
+      "usage_and_cost": "not in scope"
+    },
+    {
+      "mode": "live-preflight-failure",
+      "observations": 4,
+      "parentage_verified": true,
+      "all_error": true,
+      "model_turns_started": 0,
+      "reason": "workspace_routing_timeout",
+      "successful_live_validation": false
+    },
+    {
+      "mode": "unavailable-loopback-exporter",
+      "task_status": "succeeded",
+      "go_failed_exports": 2,
+      "python_failed_exports": 2,
+      "elapsed_seconds": 1.495,
+      "model_calls": 0
+    }
+  ]
+}
