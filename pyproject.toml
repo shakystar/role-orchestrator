@@ -1,0 +1,10 @@
+[project]
+name = "role-orchestrator"
+version = "0.1.0"
+description = "Minimal LangGraph control-plane integration pilot for role-runtime"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=1.2.22",
+    "langgraph-checkpoint-sqlite>=3.1.3",
+]

@@ -1,0 +1,30 @@
+name: pilot
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: shakystar/role-runtime
+          ref: 94bf2e798fc53736babb1b6974f5a84cd7cee00b
+          path: runtime-source
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: runtime-source/go.sum
+      - name: Build and test bridge
+        working-directory: runtime-source
+        run: |
+          go test -race ./cmd/runtime-bridge
+          go build -o ../runtime-bridge ./cmd/runtime-bridge
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.11'
+      - run: uv sync --frozen
+      - run: uv run --frozen python -m unittest discover -s tests -v
+        env:
+          ROLE_RUNTIME_BIN: ./runtime-bridge

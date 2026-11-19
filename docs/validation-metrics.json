@@ -1,0 +1,27 @@
+{
+  "backend": "codex",
+  "runtimeRevision": "94bf2e798fc53736babb1b6974f5a84cd7cee00b",
+  "langgraph": "1.2.22",
+  "checkpointSqlite": "3.1.3",
+  "codex": "0.169.1",
+  "syntheticEvidence": true,
+  "roles": 3,
+  "logicalTasks": 4,
+  "completedReceipts": 4,
+  "revisions": 1,
+  "maxActive": 1,
+  "separateProcessResume": true,
+  "successfulReceiptReplayCached": true,
+  "replayModelCalls": 0,
+  "completedStatusEvents": 4,
+  "distinctCodexProcesses": 2,
+  "modelTaskSeconds": [
+    5.303,
+    4.715,
+    5.198,
+    4.305
+  ],
+  "backendErrors": 0,
+  "outcome": "accepted",
+  "businessDemandValidated": false
+}
