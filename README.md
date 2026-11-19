@@ -45,3 +45,7 @@ See [protocol](docs/protocol.md), [validation](docs/validation.md), and [depende
 ## CI access
 
 These repositories are currently private. The default CI runs Python graph tests; cross-repository Go integration is opt-in because Actions tokens are repository-scoped. See [CI scope and access requirements](docs/validation.md#hosted-ci-scope). A skipped integration job does not count as a passing integration check; local integration and live-model results are recorded separately.
+
+## Opportunity and planning stage
+
+[기회 검토·후보 백로그](docs/planning/opportunities.md)에 관측 facade/Langfuse, 작업 계약, 제한된 후속 작업 제안, 컨텍스트 분리, 결과물 참조, 평가셋, 기억·스킬의 설계 후보를 등록했다. [관측 경계 초안](docs/planning/observability.md)과 [오픈소스 추출 근거](docs/planning/sources.md)를 함께 따른다. 문서/일부 소스 조사 결과이며 구현·정식 채택 완료를 뜻하지 않는다.
