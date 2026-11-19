@@ -1,6 +1,6 @@
 # Bridge v1 / trace propagation acceptance — 2026-11-19
 
-Status: implementation and synthetic acceptance passed. **Successful live model acceptance remains pending** because the account preflight returned `workspace_routing_timeout`. No model turn started in that probe. The goal is not complete; this is not formal orchestrator adoption or a business efficacy evaluation.
+Status: implementation, synthetic acceptance and **one successful live model acceptance passed**. The first live probe failed at account preflight with `workspace_routing_timeout` and started no model turn. A later model-free doctor reported routing available, then a fresh experiment completed the live gate. This completes the scoped technical acceptance; it is not formal orchestrator adoption or a business efficacy evaluation.
 
 ## Implemented boundary
 
@@ -23,9 +23,10 @@ Paired runtime revision: `47eb03531097e925145682600d30cb96c1ac6f8e` (also pinned
 | Fixture graph start → separate process resume → cache replay | Four actual fixture executions, five deliveries, 17 stored observations; every ID and parent matched local records |
 | Trace payload exclusion | No input/output payload on the 17 fixture observations |
 | Unavailable loopback exporter | Task succeeded; both Python and Go recorded two failed exports; completion including cleanup 1.495 s, zero model calls |
-| Live attempt | Failed at account preflight (`workspace_routing_timeout`); zero model turns started |
+| Initial live attempt | Failed at account preflight (`workspace_routing_timeout`); zero model turns started |
 | Live failure trace readback | All four observations stored; exact parents, ERROR status and no input/output payload verified |
-| Model-free official doctor | Independently returned the same routing error; no evidence establishes rate limiting or local path misrouting |
+| Model-free official doctor | Initially reproduced the routing error; a later check reported routing available. No evidence establishes rate limiting or local path misrouting |
+| Fresh live acceptance | Exactly one completed model task, two requests including cached replay with `/nonexistent/codex`, seven stored observations; all IDs/parents matched, no input/output payloads |
 
 The live failure also exposed a pre-existing lazy initialization bug: a typed-nil adapter was stored after its constructor returned an error, then panicked on close. The bridge now stores an executor only after successful construction. A regression test returns a typed nil plus error and verifies safe close. This fix does not claim to repair upstream routing.
 
@@ -45,6 +46,10 @@ The local Langfuse runbook supplies the ignored environment file. Add `--live --
 
 Sanitized measurements are in `contract-trace-metrics.json`. Prompts, receipts, session identifiers, status logs and credentials stay in ignored local artifacts. The fixture and live-failure records are separate; a failed model preflight is not counted as a successful live call.
 
-## Remaining gate and limits
+## Completion audit and limits
 
-One successful real model task followed by cached replay with an unusable Codex path, plus complete Langfuse parent readback, remains required to finish this goal. Hosted private cross-repository integration stays opt-in; a skipped CI integration job is not a pass. No production deployment, general scheduler, dynamic work generation, SMS integration, model cost accounting or telemetry durability guarantee was added.
+The final live gate passed using the committed runtime revision above and orchestrator implementation `02ee96343838fbb81c1dbd88c06d35b0a1129abb`. The acceptance script verified returned JSON, exactly one adapter completion event, one execution span, two request spans, cached zero-work statistics, and exact Langfuse observation IDs/parents. The failed state was preserved; no failed receipt was replayed or deleted. Intermittent upstream routing remains an observed limitation, not a repaired component.
+
+Every scoped requirement is now backed by the contract/ownership document, shared validators and regression tests, subprocess fixture acceptance, exporter outage evidence, and live trace/cache acceptance. Cost aggregation, dynamic task creation and SMS remain excluded. No credentials or session payloads were committed.
+
+ Hosted private cross-repository integration stays opt-in; a skipped CI integration job is not a pass. No production deployment, general scheduler, dynamic work generation, SMS integration, model cost accounting or telemetry durability guarantee was added.

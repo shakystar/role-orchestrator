@@ -30,6 +30,19 @@
       "python_failed_exports": 2,
       "elapsed_seconds": 1.495,
       "model_calls": 0
+    },
+    {
+      "mode": "live-one-call",
+      "run_id": "r-29e6a6b2381f4275a1abce8afa682a92",
+      "trace_id": "f76270a7a6254613a0b9cca371e991b3",
+      "observations": 7,
+      "runtime_executions": 1,
+      "runtime_requests": 2,
+      "cache_replay": true,
+      "cross_process_parentage": true,
+      "payloads_absent": true,
+      "model_calls": 1,
+      "usage_and_cost": "not in scope"
     }
   ]
 }
