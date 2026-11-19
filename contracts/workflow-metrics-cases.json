@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "status": "specification_not_execution_results",
+  "cases": [
+    {
+      "id": "sms_normal",
+      "component": "workflow",
+      "stimuli": [
+        "producer_completed",
+        "valid_artifact",
+        "matching_sms"
+      ],
+      "expected": "consumer_completes_once"
+    },
+    {
+      "id": "sms_duplicate",
+      "component": "workflow",
+      "stimuli": [
+        "matching_sms",
+        "same_sms_again"
+      ],
+      "expected": "one_logical_resume"
+    },
+    {
+      "id": "sms_early",
+      "component": "workflow",
+      "stimuli": [
+        "sms_before_receipt",
+        "receipt_later"
+      ],
+      "expected": "wait_then_resume_once"
+    },
+    {
+      "id": "sms_scope",
+      "component": "workflow",
+      "stimuli": [
+        "wrong_project_or_role_version_or_correlation"
+      ],
+      "expected": "no_resume"
+    },
+    {
+      "id": "artifact_invalid",
+      "component": "workflow",
+      "stimuli": [
+        "missing_or_hash_mismatch"
+      ],
+      "expected": "wait_with_reason"
+    },
+    {
+      "id": "producer_uncertain",
+      "component": "workflow",
+      "stimuli": [
+        "uncertain_receipt",
+        "matching_sms"
+      ],
+      "expected": "no_resume"
+    },
+    {
+      "id": "checkpoint_crash",
+      "component": "workflow",
+      "stimuli": [
+        "receipt_commit",
+        "exit_before_graph_checkpoint",
+        "restart"
+      ],
+      "expected": "receipt_reuse_no_new_attempt"
+    },
+    {
+      "id": "ack_crash",
+      "component": "workflow",
+      "stimuli": [
+        "graph_checkpoint_commit",
+        "exit_before_ack",
+        "restart"
+      ],
+      "expected": "ack_again_no_reexecution"
+    },
+    {
+      "id": "inbox_crash",
+      "component": "workflow",
+      "stimuli": [
+        "inbox_insert",
+        "exit_before_cursor_commit",
+        "restart"
+      ],
+      "expected": "no_lost_notification"
+    },
+    {
+      "id": "active_query",
+      "component": "control",
+      "stimuli": [
+        "long_fixture_execution",
+        "bounded_query"
+      ],
+      "expected": "query_returns_without_waiting_for_task"
+    },
+    {
+      "id": "event_duplicate",
+      "component": "metrics",
+      "stimuli": [
+        "same_event_twice"
+      ],
+      "expected": "unchanged_aggregates"
+    },
+    {
+      "id": "event_conflict",
+      "component": "metrics",
+      "stimuli": [
+        "same_event_id_different_payload"
+      ],
+      "expected": "conflict_no_overwrite"
+    },
+    {
+      "id": "event_reordered",
+      "component": "metrics",
+      "stimuli": [
+        "finished_before_started",
+        "started_later"
+      ],
+      "expected": "terminal_preserved_gap_resolved"
+    },
+    {
+      "id": "event_gap",
+      "component": "metrics",
+      "stimuli": [
+        "revision_gap"
+      ],
+      "expected": "incomplete_not_zero"
+    },
+    {
+      "id": "event_projection_crash",
+      "component": "metrics",
+      "stimuli": [
+        "intent_commit",
+        "exit_during_projection",
+        "restart"
+      ],
+      "expected": "same_event_id_no_loss_or_double_count"
+    },
+    {
+      "id": "rebuild",
+      "component": "metrics",
+      "stimuli": [
+        "ingest",
+        "discard_derived_db",
+        "replay_retained_events"
+      ],
+      "expected": "equal_aggregates_and_completeness"
+    },
+    {
+      "id": "capacity",
+      "component": "control",
+      "stimuli": [
+        "ledger_full"
+      ],
+      "expected": "new_work_not_accepted_no_silent_truncation"
+    },
+    {
+      "id": "langfuse_down",
+      "component": "observability",
+      "stimuli": [
+        "export_unavailable"
+      ],
+      "expected": "workflow_and_aggregates_unchanged_export_failure_visible"
+    },
+    {
+      "id": "usage_missing",
+      "component": "metrics",
+      "stimuli": [
+        "no_usage_record"
+      ],
+      "expected": "usage_and_cost_null_with_reason"
+    }
+  ]
+}

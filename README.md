@@ -59,3 +59,5 @@ Bridge v1 requires fresh state for old unversioned runs. Explicit legacy Go mode
 ## Workflow feasibility
 
 [SMS/checkpoint and measurement feasibility](docs/workflow-feasibility.md) records five synthetic restart, notification and artifact checks using the real Go store and LangGraph. This is an isolated experimental probe; the default CLI is still the fixed pilot. Production SMS wakeups and general metrics/usage aggregation remain to implement.
+
+Next implementation: [workflow/metrics v1 preparation](docs/planning/workflow-metrics-v1.md) defines module ownership, local control RPC, wakeup/ack order, durable event projections and 19 acceptance specifications. These specifications are not executed test results.
