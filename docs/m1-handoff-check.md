@@ -34,11 +34,16 @@ now returns `handoff_evidence` in place of `review_matches_document`. Go continu
 to validate prerequisites at execution time. Graph completion and model tracing
 checks still run without Inspect installed.
 
-For post-run scoring, use Python 3.12 with the Inspect dependency pinned by
-agent-eval M1. With M1 installed in that interpreter (or its frozen source on
-PYTHONPATH), run from role-orchestrator:
+From the role-orchestrator root, use the dedicated Python 3.12 uv project.
+The first invocation syncs the evaluation environment and runs the scorer:
 
-    python scripts/evaluate_handoff.py path/to/graph-state/handoff-evidence
+    uv run --project evaluation/m1 --frozen python scripts/evaluate_handoff.py path/to/graph-state/handoff-evidence
+
+To install separately, run `uv sync --project evaluation/m1 --frozen`. Initial
+setup needs Git access to the pinned repositories and package index access.
+The separate evaluation lock pins agent-eval with the Inspect extra and its
+transitive dependencies. Update that lock deliberately when adopting a new
+evaluator revision.
 
 Validated against agent-eval commit 16b96ee28b58a92c463d157b421ed2c13becedf9.
 Only the public CLI and version 1 manifests are used. Each invocation creates
@@ -55,3 +60,9 @@ metrics ledger were used to reconstruct the receipt fields for the export test.
 The original yielded met and a one-character mutation yielded unmet, matching
 the previous comparison. Neither command launched model work. This test exercised
 snapshot export and real M1 CLI scoring offline, not another live workflow.
+
+Git installation check (2026-11-20, Intel macOS, CPython 3.12.13, uv 0.11.13):
+a new evaluation virtualenv installed 81 packages with frozen sync. Installed
+VCS metadata matched the agent-eval and Inspect commits recorded in the lock.
+With PYTHONPATH unset, frozen offline uv runs over the retained original and
+mutated snapshots produced met (exit 0) and unmet (exit 1), respectively.
