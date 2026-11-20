@@ -12,12 +12,27 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def semantic_grade(store, run_id, evaluation, model):
-    grade_id = evaluation + '-grounding'
+def read_requirements(path):
+    contract = json.loads(path.read_text())
+    if not isinstance(contract, dict) or set(contract) != {'version', 'request', 'required_items'}:
+        raise ValueError('expected version, request and required_items')
+    items = contract['required_items']
+    if (type(contract['version']) is not int or contract['version'] != 1
+            or not isinstance(contract['request'], str) or not contract['request'].strip()
+            or not isinstance(items, list) or not 1 <= len(items) <= 8
+            or any(not isinstance(item, str) or not item.strip() for item in items)
+            or len({item.strip() for item in items}) != len(items)):
+        raise ValueError('supply a nonempty request and 1..8 distinct required items for v1')
+    return contract
+
+
+def semantic_grade(store, run_id, evaluation, model, criterion='grounding-v1'):
+    suffix = 'grounding' if criterion == 'grounding-v1' else criterion
+    grade_id = evaluation + '-' + suffix
     command = [sys.executable, '-m', 'agent_eval', '--store', str(store)]
-    grade = subprocess.run([*command, 'semantic-grade', run_id, 'review', 'grounding-v1',
+    grade = subprocess.run([*command, 'semantic-grade', run_id, 'review', criterion,
                             grade_id, '--model', model], text=True, capture_output=True)
-    result = dict(evaluation_id=grade_id, model=model, criterion='grounding-v1', outcome='unknown')
+    result = dict(evaluation_id=grade_id, model=model, criterion=criterion, outcome='unknown')
     if grade.returncode not in (0, 1):
         return {**result, 'processing': 'error', 'error_kind': 'grader_cli', 'exit_code': grade.returncode}
 
@@ -26,12 +41,16 @@ def semantic_grade(store, run_id, evaluation, model):
     case, = report['cases']
     if report['evaluation'] != grade_id or case['run'] != 'consumer':
         raise ValueError('semantic evaluation identity mismatch')
-    (store.parent / 'semantic-report.json').write_text(raw)
+    filename = 'semantic-report.json' if criterion == 'grounding-v1' else criterion + '-report.json'
+    (store.parent / filename).write_text(raw)
     return {**result, 'processing': case['processing'], 'outcome': case['draft'],
-            'error_kind': case['error_kind'], 'failure': case['failure'], 'report': 'semantic-report.json'}
+            'error_kind': case['error_kind'], 'failure': case['failure'], 'report': filename}
 
 
-def evaluate(evidence, semantic_model=None):
+def evaluate(evidence, semantic_model=None, requirements=None):
+    if requirements and not semantic_model:
+        raise ValueError('requirements grading needs a semantic model')
+    contract = read_requirements(requirements) if requirements else None
     manifest = json.loads((evidence / 'manifest.json').read_text())
     if manifest['version'] != 1:
         raise ValueError('unsupported evidence version')
@@ -73,6 +92,16 @@ def evaluate(evidence, semantic_model=None):
     if semantic_model:
         rubric = Path(__file__).resolve().parents[1] / 'evaluation/grounding/rubric-v1.txt'
         task['evaluation'] = [file_ref('grounding-v1', rubric.read_bytes())]
+    coverage = []
+    if contract:
+        policy_path = Path(__file__).resolve().parents[1] / 'evaluation/completeness/rubric-v1.txt'
+        policy = policy_path.read_text()
+        contract_ref = file_ref('requirements.json', json.dumps(contract, ensure_ascii=False).encode())
+        for index, item in enumerate(contract['required_items'], 1):
+            key = f'completeness-v1-{index}'
+            data = json.dumps({'request': contract['request'], 'required_item': item}, ensure_ascii=False)
+            task['evaluation'].append(file_ref(key, (policy + data).encode()))
+            coverage.append((key, item))
     bundle = dict(schema_version=1, id='handoff', version='1', family='handoff', split='validation', tasks=[task])
     register('bundle', bundle)
     canonical = json.dumps(bundle, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
@@ -105,6 +134,15 @@ def evaluate(evidence, semantic_model=None):
                   outcome=row['outcome'], report='report/report.json', evidence_sha256=refs['consumer']['sha256'])
     if semantic_model:
         result['semantic'] = semantic_grade(store, run_id, evaluation, semantic_model)
+    if contract:
+        items = []
+        for key, item in coverage:
+            judgment = semantic_grade(store, run_id, evaluation, semantic_model, key)
+            items.append(dict(required_item=item, **judgment))
+        outcomes = {item['outcome'] for item in items}
+        overall = 'unmet' if 'unmet' in outcomes else 'unknown' if 'unknown' in outcomes else 'met'
+        result['completeness'] = dict(request=contract['request'], requirements_sha256=contract_ref['sha256'],
+                                      outcome=overall, items=items)
     (work / 'result.json').write_text(json.dumps(result, indent=2)+'\n')
     return work, result
 
@@ -113,10 +151,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('evidence', type=Path)
     parser.add_argument('--semantic-model', help='Also grade the review reason with this agent-eval model')
+    parser.add_argument('--requirements', type=Path, help='Also assess each required item in this v1 JSON contract')
     args = parser.parse_args()
-    work, result = evaluate(args.evidence.resolve(), args.semantic_model)
+    if args.requirements and not args.semantic_model:
+        parser.error('--requirements needs --semantic-model')
+    work, result = evaluate(args.evidence.resolve(), args.semantic_model, args.requirements)
     print(json.dumps({**result, 'result_file': str(work / 'result.json')}))
     outcomes = [result['outcome']]
     if args.semantic_model:
         outcomes.append(result['semantic']['outcome'])
+    if args.requirements:
+        outcomes.extend(item['outcome'] for item in result['completeness']['items'])
     sys.exit(2 if 'unknown' in outcomes else 0 if all(v == 'met' for v in outcomes) else 1)

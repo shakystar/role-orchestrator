@@ -75,3 +75,6 @@ The model workflow's `--verify` exports a receipt-bound snapshot for separate
 
 Add `--semantic-model codex-adapter/gpt-6.2-sol` for an optional grounding
 assessment alongside the hash check. See [grader setup, outcomes and human review cases](docs/m1-handoff-check.md#optional-semantic-grading).
+
+To grade requested coverage separately from faithfulness, add a predeclared
+`--requirements` file. See [two-axis scoring and the g04 calibration](docs/m1-handoff-check.md#faithfulness-and-completeness).

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "request": "Explain when a pending handoff may resume on weekdays and on weekends.",
+  "required_items": [
+    "On a weekday, resume only after a matching signed receipt arrives.",
+    "On a weekend, the handoff remains pending until Monday."
+  ]
+}

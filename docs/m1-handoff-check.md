@@ -101,3 +101,52 @@ case. Freeze the completed sheet before viewing any model responses or doing
 model comparison. The five synthetic cases are ungraded preparation material.
 No human reference or agreement statistic is claimed. When comparing later,
 bind the frozen labels to the exact case, source and rubric versions.
+
+## Faithfulness and completeness
+
+Pass a predeclared request and its required items to score both dimensions:
+
+    uv run --project evaluation/m1 --frozen python scripts/evaluate_handoff.py path/to/handoff-evidence --semantic-model codex-adapter/gpt-6.2-sol --requirements evaluation/completeness/weekday-weekend.json
+
+The requirements contract is a version-1 JSON object with a nonempty request and
+one to eight distinct required items. Choose them before judging the answer.
+Without this flag the existing grounding-only and hash-only modes keep their
+original meaning. The reported hash identifies the serialized requirements copy
+in the private evaluation directory.
+
+The agent-eval CLI scores the hash, then grades faithfulness against the document
+and the unchanged grounding rubric. For completeness it receives the same
+document and answer, with a separate rubric containing the request and one
+required item per evaluation. Each result comes from its own agent-eval
+reliability report. The orchestrator combines these item verdicts: one unmet
+required item establishes incompleteness; otherwise an unknown leaves the
+overall outcome unknown. All items must be met for overall completeness.
+For N required items the command requests N+1 semantic grades. Each grade has
+a separate evaluation ID and error status. Any unknown yields CLI exit 2 even
+if another item independently establishes incompleteness.
+
+In result.json, semantic is the **faithfulness** judgment; completeness includes
+the request, its digest, the overall verdict, and each required item's text,
+verdict and report reference. Inspect the saved document and review alongside
+the affected items. The pinned public reliability CLI exposes draft verdicts,
+processing and failure details; it does not export the grader's free-text
+reason. The orchestrator does not manufacture a rationale. Integration need:
+an opt-in local detail field or CLI command in agent-eval if displaying verbatim
+grader reasons becomes necessary.
+
+The constructed g04 calibration asks for weekday and weekend rules but quotes
+only the weekend rule. In an actual Codex run, hash and faithfulness were met,
+weekday unmet and weekend met, giving incomplete overall. Reproduce with
+AGENT_EVAL_CODEX_GRADER set as above:
+
+    uv run --project evaluation/m1 --frozen python evaluation/completeness/check_g04.py artifacts/g04-fresh --semantic-model codex-adapter/gpt-6.2-sol
+
+The probe checks the predeclared outcomes; agent-eval performs all grading.
+Use evaluation/completeness/human-review.csv for independent two-axis reviews.
+Earlier one-axis reviewer labels do not establish completeness judgments.
+
+With the identical g04 document/review but only the weekend item requested,
+faithfulness and completeness both graded met (exit 0). In the two-item
+request, the absent weekday rule gave exit 1. Injecting a pre-call account
+timeout through a fixture grader produced unknown for faithfulness and both
+coverage items (exit 2).
