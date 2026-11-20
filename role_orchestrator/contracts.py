@@ -66,3 +66,24 @@ def strict_json(text):
             result[key] = value
         return result
     return json.loads(text, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('non-finite JSON')))
+
+class RequestNotStarted(ValueError):
+    """Local validation failed before the first byte could be submitted."""
+
+
+def encode_request(request):
+    try:
+        validate_request(request)
+        encoded = json.dumps(request, ensure_ascii=False)
+        if len(encoded.encode()) > 120 * 1024:
+            raise ValueError('request exceeds bridge frame limit')
+        return encoded
+    except ValueError as error:
+        raise RequestNotStarted(str(error)) from error
+
+
+def preflight_request(logical, run_id):
+    # Identifiers and traceparent have exactly the same wire length as at dispatch.
+    encode_request(dict(logical, schema_version=1, run_id=run_id,
+                        attempt_id=attempt_id(run_id, logical['id']),
+                        traceparent='00-'+'1'*32+'-'+'1'*16+'-01'))

@@ -64,3 +64,9 @@ The two stores do not share a transaction. This provides safe successful-result 
 ## Telemetry failure policy
 
 Both SDK queues are bounded to 64 spans with batches of 16. Go uses a two-second exporter timeout without exporter retries; Python uses its SDK's bounded HTTP timeout. Go shutdown has a three-second context; Python's local HTTP exporter has a two-second timeout. The generic Python facade cannot promise bounded shutdown for arbitrary third-party exporter implementations that ignore timeout. Export failures are summarized locally and do not change runtime receipts. Queue overflow, disk-write failure and failed exports can lose observations; no persistent replay or exactly-once telemetry is claimed. Local tracing failures must not start replacement work.
+
+## Read-only observation and bounded review
+
+`AttemptReader.read(attempt)` calls the Go bridge's versioned inspection interface. It returns the original request and receipt bytes, or an absent observation. Only the Go owner resolves runtime storage paths. Local frame validation uses the same encoder as submission and raises `RequestNotStarted` before writing to the bridge.
+
+`workflow.review.run_review` owns the writer/reviewer sequence, one optional revision, material injection and the transient handoff read. The caller supplies a journal for artifact access, stage observations and at-most-once dispatch. Inspection mode stops at the first stage without an existing observation or intent and returns `prepared`. The caller can explicitly resume the remaining stages. A failed fallback read carries its original injected error and recovery outcome.

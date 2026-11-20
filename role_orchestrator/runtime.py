@@ -10,7 +10,7 @@ from opentelemetry.context import Context
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-from .contracts import attempt_id, strict_json, validate_request, validate_response
+from .contracts import attempt_id, strict_json, encode_request, validate_response
 from .observability import Observability, MetadataExporter, local_exporter
 
 
@@ -33,6 +33,11 @@ def load_identity(state):
         or any(c not in '0123456789abcdef' for c in identity['trace_id']) or int(identity['trace_id'],16) == 0):
         raise ValueError('invalid run identity')
     return identity
+
+
+def existing_run_id(state):
+    """Read a previous run identity without initializing a new execution."""
+    return strict_json((state/'run-identity.json').read_text())['run_id']
 
 
 class Runtime:
@@ -80,7 +85,6 @@ class Runtime:
                 wire = {**request, 'schema_version': 1, 'run_id': self.identity['run_id'],
                         'attempt_id': attempt_id(self.identity['run_id'], request['id']),
                         'traceparent': carrier['traceparent']}
-                validate_request(wire)
                 span.set_attributes({'run_id': wire['run_id'], 'task_id': wire['id'], 'attempt_id': wire['attempt_id']})
                 result = self._exchange(wire)
                 span.set_attribute('cached', result['cached'])
@@ -94,10 +98,7 @@ class Runtime:
                 self.observer.ended += 1
 
     def _exchange(self, request):
-        validate_request(request)
-        encoded = json.dumps(request, ensure_ascii=False)
-        if len(encoded.encode()) > 120*1024:
-            raise ValueError('request exceeds bridge input limit')
+        encoded = encode_request(request)
         self.process.stdin.write(encoded+'\n')
         self.process.stdin.flush()
         line = self.process.stdout.readline(1024*1024)
