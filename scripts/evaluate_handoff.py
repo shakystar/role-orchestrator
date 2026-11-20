@@ -89,9 +89,19 @@ def evaluate(evidence, semantic_model=None, requirements=None):
                 inputs=[refs['producer']], evaluation=[], allowed_actions=['read supplied document'],
                 outputs=['review JSON'], completion='Review cites the supplied document.',
                 criteria=[criterion], reference_path=[], validity='unreviewed')
+    semantic_criterion = 'grounding-v1'
     if semantic_model:
-        rubric = Path(__file__).resolve().parents[1] / 'evaluation/grounding/rubric-v1.txt'
-        task['evaluation'] = [file_ref('grounding-v1', rubric.read_bytes())]
+        rubric_dir = Path(__file__).resolve().parents[1] / 'evaluation/grounding'
+        try:
+            document = json.loads((work / 'document.json').read_bytes())
+        except (UnicodeDecodeError, ValueError):
+            document = None  # Older snapshots may carry a plain-text source.
+        if isinstance(document, dict) and 'task_contract' in document:
+            semantic_criterion = 'proposal-v1'
+            rubric = rubric_dir / 'proposal-v1.txt'
+        else:
+            rubric = rubric_dir / 'rubric-v1.txt'
+        task['evaluation'] = [file_ref(semantic_criterion, rubric.read_bytes())]
     coverage = []
     if contract:
         policy_path = Path(__file__).resolve().parents[1] / 'evaluation/completeness/rubric-v1.txt'
@@ -133,7 +143,7 @@ def evaluate(evidence, semantic_model=None, requirements=None):
     result = dict(run_id=run_id, attempt_id=attempt, evaluation_id=evaluation, criterion='source-hash',
                   outcome=row['outcome'], report='report/report.json', evidence_sha256=refs['consumer']['sha256'])
     if semantic_model:
-        result['semantic'] = semantic_grade(store, run_id, evaluation, semantic_model)
+        result['semantic'] = semantic_grade(store, run_id, evaluation, semantic_model, semantic_criterion)
     if contract:
         items = []
         for key, item in coverage:

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id": "trip-planning-probe-v1",
+  "objective": "Write a short pilot decision note about the main unresolved planning question for a mixed-interest Gyeongju group. Use only these constructed observations.",
+  "required_items": [
+    "Separate a reported difficulty deciding what to do from a hypothesis about lodging.",
+    "State what remains unknown about other groups and what evidence could change the working hypothesis."
+  ],
+  "evidence": [
+    {"id": "obs-activity", "text": "In this synthetic interview, one group struggled to choose activities that suited a heritage enthusiast and friends who wanted a barbecue."},
+    {"id": "obs-stay", "text": "The same group had already booked a pool villa before asking for suggestions. No other groups were interviewed."}
+  ]
+}

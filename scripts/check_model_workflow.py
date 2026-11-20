@@ -57,9 +57,13 @@ def check(runtime, state, run_id, config, verify=False):
         assert m['complete'] and m['failed_tasks'] == 0
         assert m['usage'] is None and m['cost'] is None
         evidence = export_handoff(state, run_id, runtime / 'artifacts', receipts)
+        review = json.loads((evidence / 'review.json').read_text())
         report['verification'] = {'model_completions': len(completed), 'span_count': len(spans),
-                                  'trace_id': trace_id, 'handoff_evidence': str(evidence),
-                                  'review_verdict': json.loads((evidence / 'review.json').read_text())['verdict']}
+                                  'trace_id': trace_id, 'handoff_evidence': str(evidence)}
+        if 'action' in review:
+            report['verification']['proposal'] = review
+        else:
+            report['verification']['review_verdict'] = review['verdict']
     return report
 
 

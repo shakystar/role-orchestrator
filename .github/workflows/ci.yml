@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: shakystar/role-runtime
-          ref: bba4f3a6afc9b4ebc6adaf1c010feeb5a5434d2b
+          ref: 40a3baf4d9a195d565e6ecf9f1532b476c230425
           path: runtime-source
           token: ${{ secrets.ROLE_RUNTIME_READ_TOKEN }}
           persist-credentials: false

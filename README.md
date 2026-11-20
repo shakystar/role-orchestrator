@@ -78,3 +78,6 @@ assessment alongside the hash check. See [grader setup, outcomes and human revie
 
 To grade requested coverage separately from faithfulness, add a predeclared
 `--requirements` file. See [two-axis scoring and the g04 calibration](docs/m1-handoff-check.md#faithfulness-and-completeness).
+
+A supplied [work contract](docs/work-contract-proposals.md) now lets the document
+reviewer record a justified next action. See the [synthetic trip-planning contract](examples/discovery-contract.json).
