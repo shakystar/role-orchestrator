@@ -21,3 +21,13 @@ Private manifests, expected outcomes, reports and the inspectable store are in
 artifacts/m2-check-89695e7/handoff-grounding. After a successful account
 preflight, use the same store and frozen inputs with a fresh evaluation ID.
 Preserve the failed evaluation for comparison.
+
+## Retry after account recovery
+
+The doctor check for the grader's /usr/local/bin/codex returned routingAvailable=true.
+A fresh evaluation, grounding-live-02, used the same store, inputs, rubric and model.
+Both items were graded without errors: the original review was met and the
+contradictory reason was unmet, matching both predeclared controls. The two
+unknown judgments in grounding-live-01 were retained. No firewall settings were
+changed; these observations do not identify the cause of the earlier timeout.
+The reliability report remains unverified with zero human-reference comparisons.
