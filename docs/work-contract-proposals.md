@@ -51,3 +51,32 @@ Two attempts at live document generation ended at account_read / timeout /
 not_started before the writer turn. A doctor check succeeded between them but
 the last doctor check returned workspace_routing_timeout. No actual model
 proposal or real proposal quality score was observed in these attempts.
+
+## Live retry with temporary address mapping
+
+On 2026-11-20 the host resolved two IPv4 addresses for chatgpt.com.
+With the normal hostname and certificate validation, HTTPS to 104.18.32.47
+returned 200 (TCP connect 0.035 s); 172.64.155.209 timed out during connect
+(5 s limit). These addresses are observations from this run. Resolve and check
+again before using a temporary mapping on another run.
+
+A fresh Linux/amd64 container mapped only chatgpt.com to the responding IP
+with Docker --add-host. It reported that single address, and the official
+Codex doctor returned routingAvailable=true. Run pinned-contract-01 then used
+one worker for the writer and reviewer, two logical tasks, two attempts, one
+SMS acknowledgement and zero startup retries. Its proposal was complete: the
+note separated the observed activity-planning difficulty from a hypothesis
+about lodging. It identified independent interviews that could change the
+focus. The reviewer cited obs-activity and obs-stay. Complete refers to the
+pilot note; the observations describe a synthetic group.
+
+The first independent score used the M3 image's default Python working
+directory, which shadowed the mounted M2 package; that score is retained
+separately. The follow-up grade set /m2 as the working directory and asserted
+the loaded package path before scoring the same saved handoff. Codex auth was
+mounted read-only and containers used --rm. No host DNS or firewall setting
+was changed. This test does not locate the failing network hop.
+
+Pinned M2 (89695e7), evaluation eval-b7a8b372b253430590e81e4a9f709482:
+source-hash met, proposal-v1 met, graded without a scorer error. This is one
+live proposal with constructed evidence; no human reference was registered.
