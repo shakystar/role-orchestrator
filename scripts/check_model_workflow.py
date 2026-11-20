@@ -4,10 +4,10 @@ Never launches Codex, retries a failed task, or imposes a model-turn deadline.
 Run with PYTHONPATH=. from the repository root. Raw artifacts stay local.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
+from role_orchestrator.workflow.handoff import export_handoff
 from role_orchestrator.metrics import Metrics
 from role_orchestrator.workflow.client import Client
 from role_orchestrator.workflow.runner import Workflow
@@ -34,13 +34,12 @@ def check(runtime, state, run_id, config, verify=False):
         metrics.close()
     if verify:
         assert report['done'], 'workflow not complete'
+        receipts = {}
         for task in ('producer', 'consumer'):
             receipt = client.call('receipts.get', task_id=task)
             assert receipt['status'] == 'completed' and receipt['artifact_valid']
             assert receipt['execution'] == 'completed'
-        document = (runtime / 'artifacts/document.json').read_bytes()
-        review = json.loads((runtime / 'artifacts/review.json').read_text())
-        assert review['source_sha256'] == hashlib.sha256(document).hexdigest()
+            receipts[task] = receipt
         statuses = [json.loads(s) for s in (runtime / 'model-status.jsonl').read_text().splitlines()]
         completed = [s for s in statuses if s['phase'] == 'completed']
         assert len(completed) == 2, 'model completion count changed'
@@ -57,9 +56,10 @@ def check(runtime, state, run_id, config, verify=False):
         assert (m['logical_tasks'], m['execution_attempts'], m['completed_tasks']) == (2, 2, 2)
         assert m['complete'] and m['failed_tasks'] == 0
         assert m['usage'] is None and m['cost'] is None
+        evidence = export_handoff(state, run_id, runtime / 'artifacts', receipts)
         report['verification'] = {'model_completions': len(completed), 'span_count': len(spans),
-                                  'trace_id': trace_id, 'review_verdict': review['verdict'],
-                                  'review_matches_document': True}
+                                  'trace_id': trace_id, 'handoff_evidence': str(evidence),
+                                  'review_verdict': json.loads((evidence / 'review.json').read_text())['verdict']}
     return report
 
 

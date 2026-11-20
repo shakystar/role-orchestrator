@@ -16,6 +16,7 @@ jobs:
       - run: uv run --frozen python -m unittest discover -s tests -p test_observability.py -v
       - run: uv run --frozen python -m unittest discover -s tests -p test_metrics.py -v
       - run: uv run --frozen python -m unittest discover -s tests -p test_workflow_failure_status.py -v
+      - run: uv run --frozen python -m unittest discover -s tests -p test_handoff_export.py -v
   integration:
     # Separate private repositories require an explicitly configured read credential.
     # A skipped job is not evidence of a passing integration test.

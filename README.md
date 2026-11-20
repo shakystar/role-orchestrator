@@ -69,3 +69,6 @@ Next implementation: [workflow/metrics v1 preparation](docs/planning/workflow-me
 ## Model-backed workflow slice
 
 The same SMS/control/checkpoint path now supports a fixed Codex writer → reviewer through Go. [Implementation and actual-model verification](docs/model-workflow-validation.md) distinguish synthetic acceptance tests, live model execution, restart reuse and local Langfuse readback. Use `examples/model-document-workflow.json`; fixture mode remains the default.
+
+The model workflow's `--verify` exports a receipt-bound snapshot for separate
+[M1 post-run handoff evaluation](docs/m1-handoff-check.md#operational-handoff-to-m1).
