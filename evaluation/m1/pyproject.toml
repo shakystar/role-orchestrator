@@ -3,7 +3,7 @@ name = "role-orchestrator-m1-evaluation"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "agent-eval[inspect] @ git+https://github.com/shakystar/agent-eval.git@16b96ee28b58a92c463d157b421ed2c13becedf9",
+    "agent-eval[inspect] @ git+https://github.com/shakystar/agent-eval.git@89695e754a077cb8ed01db6cdd26ebd1d67826cf",
 ]
 
 [tool.uv]

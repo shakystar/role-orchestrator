@@ -66,3 +66,38 @@ a new evaluation virtualenv installed 81 packages with frozen sync. Installed
 VCS metadata matched the agent-eval and Inspect commits recorded in the lock.
 With PYTHONPATH unset, frozen offline uv runs over the retained original and
 mutated snapshots produced met (exit 0) and unmet (exit 1), respectively.
+
+## Optional semantic grading
+
+The operational evaluation lock now uses M2 commit
+89695e754a077cb8ed01db6cdd26ebd1d67826cf. The existing evaluation/m1 project
+path and default hash-only command remain compatible. For a live semantic
+review, build the M2 codex-grader from that pinned agent-eval checkout
+(`cd adapters/codex && go build -o /absolute/path/to/codex-grader .`).
+With local Codex authentication, run from role-orchestrator:
+
+    export AGENT_EVAL_CODEX_GRADER=/absolute/path/to/codex-grader
+    uv run --project evaluation/m1 --frozen python scripts/evaluate_handoff.py path/to/handoff-evidence --semantic-model codex-adapter/gpt-6.2-sol
+
+Enabling the flag sends the document, rubric and saved review to the selected
+grader. result.json retains the hash outcome and adds a semantic object with
+its evaluation ID, outcome, processing status, structured failure when available,
+and the M2 reliability report path when produced. A graded unknown indicates
+insufficient evidence; scorer_error indicates an evaluation failure. For a
+completed command, exit 0 means all requested checks met, 1 means an unmet
+check, and 2 means at least one unknown. No downstream work is submitted.
+
+End-to-end validation with this command: the archived original scored met/met
+(exit 0); the same hash plus a reversed reason scored met/unmet (exit 1). An
+injected pre-dispatch account timeout scored met/unknown with the not_started
+failure preserved (exit 2). The mutated hash scored unmet in default mode.
+
+## Independent reviewer preparation
+
+Use evaluation/grounding/blind-cases.json and rubric-v1.txt together. Copy
+human-review.csv into private storage, enter reviewer, met/unmet/unknown, the
+relevant source phrase (or identify missing evidence), and reasoning for each
+case. Freeze the completed sheet before viewing any model responses or doing
+model comparison. The five synthetic cases are ungraded preparation material.
+No human reference or agreement statistic is claimed. When comparing later,
+bind the frozen labels to the exact case, source and rubric versions.

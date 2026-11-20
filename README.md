@@ -72,3 +72,6 @@ The same SMS/control/checkpoint path now supports a fixed Codex writer → revie
 
 The model workflow's `--verify` exports a receipt-bound snapshot for separate
 [M1 post-run handoff evaluation](docs/m1-handoff-check.md#operational-handoff-to-m1).
+
+Add `--semantic-model codex-adapter/gpt-6.2-sol` for an optional grounding
+assessment alongside the hash check. See [grader setup, outcomes and human review cases](docs/m1-handoff-check.md#optional-semantic-grading).

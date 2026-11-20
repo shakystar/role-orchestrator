@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "source": "On a weekday a pending handoff may resume only after a matching signed receipt arrives. On a weekend it remains pending until Monday. The separate operations annex is unavailable.",
+  "cases": [
+    {"id":"g01","reason":"The weekday rule permits resumption after a matching signed receipt arrives, while weekend handoffs wait until Monday."},
+    {"id":"g02","reason":"The separate operations annex requires the shift lead to phone the author before a handoff."},
+    {"id":"g03","reason":"A matching signed receipt permits resumption on any day of the week."},
+    {"id":"g04","reason":"For weekends, the policy says that the handoff ‘remains pending until Monday’."},
+    {"id":"g05","reason":"On weekdays, the policy instructs the worker to resume immediately and obtain the matching receipt afterward."}
+  ]
+}
