@@ -1,3 +1,4 @@
+<a id="sms-workflow-and-metrics-v1-implementation"></a>
 # SMS 워크플로와 지표 v1 구현
 
 2026-11-19. 첫 구현에서 runtime 소유 프로세스의 제어 인터페이스, 영속 알림 inbox, LangGraph 재개·ack, runtime 수명주기 기록, 독립 지표 집계와 고정 수용 검사 runner를 연결했다. 합성 작업으로 검증했으며 모델 호출과 업무 품질 평가는 수행하지 않았다. 기본 CLI는 기존 고정 파일럿을 사용한다.

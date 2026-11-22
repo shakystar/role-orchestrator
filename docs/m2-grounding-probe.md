@@ -1,3 +1,4 @@
+<a id="m2-handoff-grounding-probe-2026-11-20"></a>
 # M2 인계 결과의 근거 검증 — 2026-11-20
 
 임시 Python 3.12 평가 환경에서 agent-eval 커밋 89695e754a077cb8ed01db6cdd26ebd1d67826cf, Go codex-grader와 모델 codex-adapter/gpt-6.2-sol을 사용했다. 운영용 M1 의존성은 기존 revision으로 고정했다.

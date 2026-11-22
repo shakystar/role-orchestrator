@@ -1,3 +1,4 @@
+<a id="bridge-v1-contract-and-ownership"></a>
 # Bridge v1 계약과 상태 소유권
 
 버전이 없던 통신 형식을 v1으로 교체했다. 두 저장소에서 같은 요청 검증 벡터를 사용한다. Python은 `contracts/v1-vectors.json`, Go는 `cmd/runtime-bridge/testdata/v1-vectors.json`에 벡터를 보관하고 각각 독립적으로 검증한다. 통합 테스트에서는 실제 bridge를 실행한다.

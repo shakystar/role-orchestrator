@@ -1,7 +1,9 @@
+<a id="local-langfuse-feasibility-stack"></a>
 # 로컬 Langfuse 검증 환경
 
 Langfuse **4.82.0**의 [공식 Compose 구성](https://github.com/langfuse/langfuse/blob/6dfeb6049b8fa2795af7bfce1cce9bbe60aca4c0/docker-compose.yml)을 바탕으로 구성했습니다. compose.yaml과 [images.lock.json](images.lock.json)에서 공식 이미지 6개의 다이제스트를 고정합니다. 전용 Compose 프로젝트 `role-observability`에서 웹, 워커, PostgreSQL, Redis, ClickHouse, MinIO를 실행합니다. AI 게이트웨이와 모델 공급자는 설정하지 않습니다.
 
+<a id="start-and-access"></a>
 ## 시작과 접속
 
 role-orchestrator 루트에서 실행합니다.
@@ -21,6 +23,7 @@ curl --max-time 10 http://localhost:3300/api/public/health
 
 검증 환경의 Docker Desktop VM에는 CPU 6개와 약 8 GiB 메모리가 할당됐습니다. 이는 검증 당시 환경이며 최소 자원 기준은 측정하지 않았습니다. 데이터는 이름 있는 볼륨에 보관합니다. 컨테이너 로그는 서비스별로 10 MB 파일 3개까지 순환 저장합니다. 이 파일럿은 데이터베이스와 애플리케이션 데이터 크기를 자동으로 제한하지 않습니다.
 
+<a id="probe"></a>
 ## 검사 실행
 
 루트 README의 절차대로 기존 Go 브리지를 빌드하고 고정된 Python 의존성을 설치한 다음 아래 명령을 실행합니다.
@@ -35,6 +38,7 @@ uv run --frozen python scripts/probe_langfuse.py \
 
 **Langfuse v4의 events_only 배포에서는 기존 `/api/public/traces` 조회를 비활성화합니다.** 해당 경로에서 404가 반환돼도 OTLP 수집 실패를 뜻하지 않습니다. 검사는 지원되는 v2 관측 API를 사용합니다. [공식 API 정의](https://github.com/langfuse/langfuse/blob/6dfeb6049b8fa2795af7bfce1cce9bbe60aca4c0/fern/apis/server/definition/observations.yml)
 
+<a id="stop-resume-and-outage-check"></a>
 ## 중지·재개와 장애 검사
 
 ```sh
@@ -50,6 +54,7 @@ docker compose -f infra/langfuse/compose.yaml --env-file infra/langfuse/.env ps
 
 설치 중 방화벽·프록시·TLS·정책 오류가 발생하면 중단하고 오류를 보고합니다. 보안 검사를 끄거나 방화벽 설정을 바꾸거나 대체 이미지 미러를 사용하거나 설치를 강행하지 않습니다. 사용자가 명시한 제약입니다.
 
+<a id="boundaries"></a>
 ## 검증 범위
 
 OTel 관측 모듈은 선택적으로 사용합니다. 큐는 스팬 64개, 배치는 16개로 제한하고 속성 크기에도 제한을 둡니다. HTTP exporter의 제한 시간은 2초이며 실패·손실 건수를 기록합니다. 메모리 내 exporter로 실패와 전송 차단을 포함해 검사합니다. 디스크 임시 저장이나 전달 보장은 구현하지 않았습니다.

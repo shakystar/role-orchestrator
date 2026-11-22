@@ -1,3 +1,4 @@
+<a id="local-langfuse-validation--2026-11-19"></a>
 # 로컬 Langfuse 검증 — 2026-11-19
 
 로컬 Docker 수신기, 크기를 제한한 메타데이터 전용 OTel 전송, 독립 REST 조회의 기술적 가능성을 확인했다. 업무 효용, 전체 파이프라인 E2E, 운영용 관측 facade 전반은 검증 범위 밖이다.

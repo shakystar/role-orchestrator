@@ -1,3 +1,4 @@
+<a id="scope"></a>
 # 작업 범위
 
 - 최소 통합 실험입니다. 변경 전 README.md와 docs/validation.md를 읽습니다.
@@ -9,6 +10,7 @@
 - 산출물·모델 대화 기록·인증 정보·로컬 세션을 Git에서 제외합니다.
 - uv.lock으로 의존성 버전을 고정합니다. 프로토콜을 변경하면 실제 Go 브리지로 검사합니다.
 
+<a id="user-facing-completion-reports"></a>
 # 사용자 완료 보고
 
 - [완료 보고 규격 v1](docs/completion-reporting.md)을 따릅니다.

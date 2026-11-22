@@ -1,3 +1,4 @@
+<a id="bridge-v1--trace-propagation-acceptance--2026-11-19"></a>
 # Bridge v1과 trace 전파 수용 검사 — 2026-11-19
 
 구현과 합성 수용 검사, **실모델 수용 검사 1건**을 완료했다. 첫 실모델 시도는 계정 사전 검사에서 `workspace_routing_timeout`으로 실패하여 모델 턴을 시작하지 못했다. 이후 모델을 호출하지 않는 doctor가 라우팅 가능을 보고했고 새 실험에서 실모델 검사를 통과했다. 이 결과는 명시한 기술 범위에 한정하며 orchestrator 정식 채택이나 업무 효과 평가는 별도다.
