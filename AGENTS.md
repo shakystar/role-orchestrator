@@ -1,17 +1,19 @@
-# Scope
+<a id="scope"></a>
+# 작업 범위
 
-- This is a minimal integration experiment. Read README.md and docs/validation.md before changes.
-- Do not expand into production orchestration or business research without a task requiring it.
-- Keep decision/checkpoint state in Python and execution/session receipts in role-runtime.
-- Do not call Codex directly from Python or copy Go runtime internals here.
-- Preserve explicit fixture vs live-model evidence. Never report synthetic evidence as market validation.
-- Bound retries, graph loops and work submission. Never silently replay uncertain external work.
-- Keep artifacts, model transcripts, credentials and local sessions out of Git.
-- Pin dependencies with uv.lock. Run tests against the real Go bridge for protocol changes.
+- 최소 통합 실험입니다. 변경 전 README.md와 docs/validation.md를 읽습니다.
+- 명시된 과제에서 요구하는 경우에만 운영 오케스트레이션이나 사업 조사로 범위를 넓힙니다.
+- 의사결정·체크포인트 상태는 Python에서, 실행·세션 영수증은 role-runtime에서 관리합니다.
+- Python에서 Codex를 직접 호출하거나 Go 런타임 내부 구현을 이 저장소로 복사하지 않습니다.
+- fixture와 실제 모델의 검증 근거를 구분합니다. 합성 근거를 시장 검증 결과로 보고하지 않습니다.
+- 재시도·그래프 반복·작업 제출에 상한을 둡니다. 결과가 불확실한 외부 작업을 묵시적으로 재실행하지 않습니다.
+- 산출물·모델 대화 기록·인증 정보·로컬 세션을 Git에서 제외합니다.
+- uv.lock으로 의존성 버전을 고정합니다. 프로토콜을 변경하면 실제 Go 브리지로 검사합니다.
 
-# User-facing completion reports
+<a id="user-facing-completion-reports"></a>
+# 사용자 완료 보고
 
-- Follow [completion reporting v1](docs/completion-reporting.md).
-- Lead with concrete before/after behavior and what the user can now do. Keep the implemented components visible immediately afterward; both are required.
-- Distinguish implementation, integration, synthetic verification and real-model/operational verification. Do not inflate the baseline or claim unmeasured improvements.
-- End with concise verification, remaining scope and supporting links. Scale the format to the task; do not replace the explanation with file lists or test counts.
+- [완료 보고 규격 v1](docs/completion-reporting.md)을 따릅니다.
+- 구체적인 변경 전후 동작과 사용자가 새로 할 수 있는 일을 먼저 쓰고, 이를 구현한 구성요소를 바로 뒤에 제시합니다. 두 내용을 모두 포함합니다.
+- 구현, 통합, 합성 검증, 실제 모델·운영 검증을 구분합니다. 기존 상태를 과장하거나 측정하지 않은 개선을 주장하지 않습니다.
+- 검증 결과와 남은 범위, 근거 링크를 간결하게 제시하며 마칩니다. 작업 규모에 맞게 형식을 조정하고 파일 목록이나 검사 건수만으로 설명을 대신하지 않습니다.
