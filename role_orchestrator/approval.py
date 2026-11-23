@@ -14,7 +14,7 @@ from .workflow.client import Client, ControlError
 
 
 SUCCESS = ('completed', 'succeeded', 'success')
-PENDING = ('pending', 'queued', 'running', 'submitted', 'accepted')
+PENDING = ('pending', 'queued', 'running', 'submitted', 'accepted', 'ready', 'waiting')
 # Only errors specified as pre-admission validation outcomes are definitive.
 REJECTED = ('conflict', 'unsupported')
 SHA256 = re.compile(r'[0-9a-f]{64}')
