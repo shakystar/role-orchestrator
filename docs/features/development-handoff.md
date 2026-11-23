@@ -4,6 +4,32 @@
 
 ## 개발 과제 한 건
 
+Python 소스 변경을 목표부터 시작할 때는 `case_id`, `goal`, 기준 Git 커밋 전체 SHA인 `base_sha`, 저장소 경로인 `source.path`를 제공합니다. 변경 범위가 정해져 있으면 `source.files`에 기준 커밋의 Python 경로를 지정합니다. 생략하면 시나리오 담당자가 추적된 Python 파일 목록에서 작업에 필요한 소스를 고릅니다. 실행 명령은 아래와 같습니다.
+
+```sh
+python -m role_orchestrator.development_case run \
+  --state "$STATE" --runtime "$BRIDGE" --lab "$LAB" \
+  --revision "$ROSTER_SHA" --backend codex < goal.json
+```
+
+이 경로는 명부의 시나리오·동일성·중단 상태·검증 사례 담당자에게 순서대로 배정합니다. 독립 검토자가 검증 사례의 해시를 수락하면 회귀 검사 작성자와 Python 패치 작성자가 작업합니다. 패치 검토는 별도 세션에서 진행하며 성공 상태는 `patch_reviewed`입니다. Go 변경이 필요한 과제는 이 Python 경로의 적용 범위 밖입니다.
+
+검증 사례 검토자가 현재 해시를 지정해 `revise`를 반환하면 사례 작성자가 해당 지적을 받아 최대 두 차례 수정합니다. 검토자는 수정본의 해시를 다시 판정합니다. 이전 사례와 검토 영수증은 상태 디렉터리에 보존됩니다. `blocked` 또는 다른 해시에 대한 판정은 이 보완을 시작하지 않습니다.
+
+패치 검토의 원본 실행이 끝났으나 응답이 출력 계약을 위반한 경우에는 런타임 영수증의 작업·담당자·입력을 대조한 후 같은 패치에 대한 판정 형식을 최대 두 차례 보완합니다. 불확실한 실행은 다시 제출하지 않습니다.
+
+격리 실행기는 역할이 제출한 테스트와 별도로 준비한 독립 검사를 각각 기준 소스와 후보 패치에 적용해 종료 코드와 로그를 보존합니다. 다음 명령은 패치·테스트·영수증·로그 해시를 대조한 뒤 명부의 증거 검토자에게 인수를 배정합니다. 두 검사 모두 기준 실패와 후보 통과를 기록하고 증거 검토자가 같은 기준을 통과로 판정해야 `accepted`를 반환합니다. 아래 입력은 권한 있는 실행기가 생성한 결과를 사용합니다.
+
+```sh
+python -m role_orchestrator.development_acceptance run \
+  --state "$STATE" --runtime "$BRIDGE" --lab "$LAB" --revision "$ROSTER_SHA" \
+  --backend codex --execution execution.json --oracle oracle.py \
+  --baseline-log baseline.log --candidate-log candidate.log \
+  --role-baseline-log role-baseline.log --role-candidate-log role-candidate.log < goal.json
+```
+
+### 기존 작성·검토 입력
+
 Python 패치 작성자 `acl-007`과 독립 검토자 `acl-005`가 한 과제를 이어서 진행합니다. 입력 파일은 `case_id`, `criterion`, `author` 객체 필드를 가집니다. `case_id`는 문자열이고 `criterion.id`는 검증할 조건의 이름입니다. `author`에는 목표 문자열 `goal`, 전체 소스 커밋 `base_sha`, 그리고 `source`, `regression`, `acceptance`, `output_contract` 객체를 넣습니다. 코드와 검사 조건은 주어진 자료 안에서 읽을 수 있어야 합니다.
 
 ```sh
