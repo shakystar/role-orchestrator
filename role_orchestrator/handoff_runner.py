@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -25,15 +24,15 @@ import sys
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-from .contracts import attempt_id
+from .attempts import AttemptReader, terminal_failure
+from .contracts import attempt_id, strict_json as load, supported_route
 from .handoffs import Handoffs
-from os import environ
+from .role_contracts import contract_instruction, output_payload, role_contract, validate_inputs, validate_output
 
 from .runtime import Runtime, load_identity
 
 
 ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', re.ASCII)
-EFFORTS = {'low', 'medium', 'high'}
 OPS = {
     'publish-initial': ({'payload'}, set()),
     'validate': (set(), {'feedback', 'reviewed_ref'}),
@@ -46,20 +45,6 @@ OPS = {
 
 def dump(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
-
-
-def load(data):
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise ValueError('duplicate JSON key')
-            result[key] = value
-        return result
-
-    result = json.loads(data, object_pairs_hook=pairs)
-    dump(result)  # Reject non-finite numbers, including float overflow.
-    return result
 
 
 def keys(value, required, optional=()):
@@ -77,7 +62,7 @@ def nonempty(value):
     return isinstance(value, str) and bool(value.strip())
 
 
-def parse(doc, backend):
+def parse(doc, backend, *, pin=True):
     if not isinstance(doc, dict) or not isinstance(doc.get('op'), str) or doc['op'] not in OPS:
         raise ValueError('unknown operation')
     op = doc['op']
@@ -103,7 +88,9 @@ def parse(doc, backend):
             if name in ref:
                 ident(ref[name], f'reviewed_ref {name}')
     plan = doc['plan']
-    keys(plan, {'producer', 'consumer', 'slot', 'required_fields'})
+    keys(plan, {'producer', 'consumer', 'slot', 'required_fields'}, {'consumer_input', 'producer_input'})
+    if 'producer_input' in plan and not isinstance(plan['producer_input'], dict):
+        raise ValueError('producer_input must be the original named assignment input object')
     ident(plan['slot'], 'slot')
     fields = plan['required_fields']
     if not isinstance(fields, list) or not all(nonempty(field) for field in fields) or len(set(fields)) != len(fields):
@@ -111,17 +98,27 @@ def parse(doc, backend):
     bound = {**plan, 'backend': backend, 'required_fields': sorted(fields)}
     for role in ('producer', 'consumer'):
         actor = plan[role]
-        keys(actor, {'member', 'instruction', 'model', 'effort'})
+        keys(actor, {'member', 'instruction', 'model', 'effort'}, {'profile', 'role_id'})
         ident(actor['member'], f'{role} member ID')
         ident(actor['model'], f'{role} model ID')
-        allowed_models = {'gpt-6.2-sol', 'gpt-6.2-astra'}
-        if actor['model'] not in allowed_models:
-            raise ValueError(f'{role} model ID is not allowed')
-        if not nonempty(actor['instruction']) or not isinstance(actor['effort'], str) or actor['effort'] not in EFFORTS:
+        if not supported_route(actor['model'], actor['effort']):
+            raise ValueError(f'{role} model or reasoning effort is not allowed')
+        if not nonempty(actor['instruction']):
             raise ValueError(f'invalid {role} instruction or reasoning effort')
         bound[role] = {**actor, 'role': role}
+        if pin:
+            spec = role_contract(actor['member'], actor.get('role_id'), actor.get('profile', 'lab-v1'))
+            if spec is not None:
+                bound[role]['contract'] = spec
     if bound['producer']['member'] == bound['consumer']['member']:
         raise ValueError('producer and consumer must be distinct')
+    if 'consumer_input' in bound:
+        binding = bound['consumer_input']
+        keys(binding, {'field', 'format', 'context'})
+        ident(binding['field'], 'consumer input field')
+        if (binding['format'] not in ('payload', 'revision') or not isinstance(binding['context'], dict)
+                or binding['field'] in binding['context']):
+            raise ValueError('invalid consumer input binding')
     return bound
 
 
@@ -161,36 +158,22 @@ def open_request(state, slot, rid):
 
 
 def inspect(binary, state_parent, run_id, intent):
-    from .attempts import AttemptReader
-
     attempt = intent['attempt_id']
-    evidence = AttemptReader(binary, state_parent, run_id).read(attempt)
+    evidence = AttemptReader(binary, state_parent, run_id).bound(attempt, intent['task'])
     if evidence is None:
         return None
-    wire_bytes, receipt_bytes = evidence
-    wire, receipt = load(wire_bytes), load(receipt_bytes)
-    if not isinstance(wire, dict) or not isinstance(receipt, dict):
-        raise ValueError('invalid inspector evidence')
-    task = intent['task']
-    if (type(wire.get('schema_version')) is not int or wire['schema_version'] != 1
-            or wire.get('run_id') != run_id or wire.get('attempt_id') != attempt
-            or any(name not in wire or wire[name] != value
-                   for name, value in task.items())):
-        raise ValueError('wire request does not match intent')
-    receipt_task = receipt.get('task')
-    if (receipt.get('status') != 'succeeded'
-            or ('run_id' in receipt and receipt['run_id'] != run_id)
-            or ('attempt_id' in receipt and receipt['attempt_id'] != attempt)
-            or not isinstance(receipt_task, dict)
-            or any(receipt_task.get(name) != task[name] for name in ('id', 'role', 'input'))
-            or receipt_task.get('version') != 'v1'):
-        raise ValueError('receipt does not match intent')
+    receipt, receipt_sha256 = evidence
+    failure = terminal_failure(receipt)
+    if failure:
+        return {'state': 'failed', 'reason': failure, 'receipt_sha256': receipt_sha256}
+    if receipt.get('status') != 'succeeded':
+        raise ValueError('receipt_not_terminal')
     result = receipt.get('result')
     if (not isinstance(result, dict) or result.get('actual_member_id') != intent['member']
             or result.get('actual_role_version') != 'v1'
-            or not isinstance(result.get('text'), str)):
+            or not isinstance(result.get('text', ''), str)):
         raise ValueError('invalid receipt result')
-    return attempt, 'v1', result, hashlib.sha256(receipt_bytes).hexdigest()
+    return {'state': 'succeeded', 'text': result.get('text', ''), 'receipt_sha256': receipt_sha256}
 
 
 class Runner:
@@ -202,25 +185,68 @@ class Runner:
         self.consumer = plan['consumer']['member']
         self.slot = plan['slot']
 
+    def consumer_inputs(self, source):
+        contract = self.plan['consumer'].get('contract')
+        if not contract:
+            return None
+        binding = self.plan.get('consumer_input')
+        payload = source['payload']
+        if binding:
+            value = payload
+            if binding['format'] == 'revision':
+                value = dict(**source['artifact'], member_id=self.producer, run_id=self.run_id, artifact=payload)
+            payload = {**binding['context'], binding['field']: value}
+        validate_inputs(payload, contract)
+        return payload
+
+    def producer_output(self, payload):
+        contract = self.plan['producer'].get('contract')
+        if contract:
+            validate_output(payload, contract, self.plan.get('producer_input', {}))
+
     def run(self, doc):
         op = doc['op']
         if op == 'status':
-            return self.h.state(self.consumer)
+            state = self.h.state(self.consumer)
+            row = self.db.execute('SELECT ack FROM jobs WHERE task_id=?', ('consume',)).fetchone()
+            if row and row[0]:
+                ack = load(row[0])
+                if ack['state'] == 'failed':
+                    return {**state, **ack}
+                if 'artifact' in ack:
+                    artifact = ack['artifact']
+                    output = self.h.read(self.consumer, artifact['kind'], revision=artifact['revision'])
+                    if output is None or output['artifact'] != artifact:
+                        raise ValueError('completed output does not match its receipt')
+                    state.update(ack)
+                    state['output'] = output
+            for pending in (state['open_requests'] if not row else ()):
+                if not pending.get('current'):
+                    continue
+                repair_id = self.h.repair_task_id(pending['request_id'], self.producer, self.slot)
+                failure = self.db.execute(
+                    "SELECT ack FROM jobs WHERE task_id=? AND json_extract(ack,'$.state')='failed'",
+                    (repair_id,)).fetchone()
+                if failure:
+                    state.update(load(failure[0]))
+                    break
+            return state
         if op == 'publish-initial':
             return self.h.publish(self.producer, self.slot, doc['payload'], base_revision=0)
         if op == 'validate':
             return self.h.validate(self.consumer, self.slot, reviewed_ref=doc.get('reviewed_ref'),
+                                   payload_check=self.producer_output,
                                    **doc.get('feedback', {}))
         if op == 'accept-review':
-            return self.h.accept_review(self.consumer, self.slot, doc['reviewed_ref'])
+            return self.h.accept_review(self.consumer, self.slot, doc['reviewed_ref'], payload_check=self.producer_output)
         rid = doc.get('request_id')
         draft = {'fixture': doc['fixture']} if 'fixture' in doc else {}
         if op == 'repair':
-            # The original request may have closed since the job was recorded.
-            for saved_intent, saved_ack in self.db.execute('SELECT intent, ack FROM jobs').fetchall():
-                intent = load(saved_intent)
-                if intent['op'] == 'repair' and intent['request_id'] == rid:
-                    return load(saved_ack) if saved_ack is not None else self.resume(intent)
+            # The original request or an alias may have closed since dispatch.
+            repair_id = self.h.repair_task_id(rid, self.producer, self.slot)
+            row = self.db.execute('SELECT intent, ack FROM jobs WHERE task_id=?', (repair_id,)).fetchone()
+            if row is not None:
+                return load(row[1]) if row[1] is not None else self.resume(load(row[0]))
             original = self.h.prepared_claim(self.producer, request_id=rid)
             if original is None:
                 request = open_request(self.h.state(self.consumer), self.slot, rid)
@@ -230,6 +256,12 @@ class Runner:
                 base = request.get('base_revision')
                 if type(base) is not int or not 0 <= base < 2**63 - 1:
                     raise ValueError('invalid request base revision')
+                producer_contract = self.plan['producer'].get('contract')
+                if producer_contract:
+                    try:
+                        validate_inputs(self.plan.get('producer_input', {}), producer_contract)
+                    except ValueError as exc:
+                        return {'state': 'blocked', 'reason': str(exc), 'request_id': rid}
                 draft.update(request_id=rid, base_revision=base, feedback={
                     key: request[key] for key in ('criterion_id', 'field_path', 'observed',
                                                   'required_change', 'acceptance_check') if key in request})
@@ -248,6 +280,13 @@ class Runner:
 
         role = 'producer' if op == 'repair' else 'consumer'
         if op == 'consume':
+            if (self.plan['consumer'].get('contract') or self.plan['producer'].get('contract')) and self.h.state(self.consumer)['state'] == 'ready':
+                try:
+                    source = self.h.read(self.producer, self.slot)
+                    self.producer_output(source['payload'])
+                    self.consumer_inputs(source)
+                except ValueError as exc:
+                    return {'state': 'blocked', 'reason': str(exc)}
             claim = self.h.claim_ready(self.consumer, preparation=draft)
         if state_of(claim) not in ('ready', 'uncertain'):
             return claim if isinstance(claim, dict) else {'state': claim}
@@ -266,17 +305,22 @@ class Runner:
                 return {'state': 'blocked', 'reason': 'request base mismatch', 'request_id': rid}
             body = {'slot': self.slot, 'request_id': rid, 'base_revision': base,
                     'current': current, 'inputs': inputs, 'feedback': draft['feedback']}
+            if self.plan['producer'].get('contract'):
+                body['assignment_inputs'] = self.plan['producer_input']
         else:
             try:
                 current = self.h.read_claimed(self.consumer, self.slot)
             except (ValueError, LookupError, sqlite3.Error):
                 return {'state': 'uncertain', 'reason': 'claimed artifact could not be verified'}
             body = {'slot': self.slot, **current}
+            if self.plan['consumer'].get('contract'):
+                body['inputs'] = self.consumer_inputs(current)
             base = current['artifact']['revision']
         if 'fixture' in draft:
             body['fixture'] = draft['fixture']
         actor = self.plan[role]
-        task = {'id': task_id, 'role': actor['member'], 'instruction': actor['instruction'], 'input': dump(body)}
+        instruction = contract_instruction(actor['instruction'], actor.get('contract'))
+        task = {'id': task_id, 'role': actor['member'], 'instruction': instruction, 'input': dump(body)}
         intent = {'op': op, 'request_id': rid, 'base_revision': base, 'task': task,
                   'attempt_id': attempt_id(self.run_id, task_id), 'member': actor['member']}
         intent['phase'] = 'prepared'
@@ -316,20 +360,36 @@ class Runner:
             return {'state': 'uncertain', 'reason': 'no verified successful receipt', **ref}
         if proof is None:
             return {'state': 'uncertain', 'reason': 'receipt absent after intent', **ref}
-        receipt_id, version, wire, receipt_sha256 = proof
-        ack = {**ref, 'receipt_id': receipt_id, 'receipt_sha256': receipt_sha256, 'actual_member_id': intent['member'],
-               'actual_role_version': version}
+        receipt_id = intent['attempt_id']
+        ack = {**ref, 'receipt_id': receipt_id, 'receipt_sha256': proof['receipt_sha256']}
+        if intent.get('request_id'):
+            ack['request_id'] = intent['request_id']
+        if proof['state'] == 'failed':
+            return self.record(task_id, {**ack, 'state': 'failed', 'reason': proof['reason']})
+        ack.update(actual_member_id=intent['member'], actual_role_version='v1')
+        contract = self.plan['producer' if intent['op'] == 'repair' else 'consumer'].get('contract')
+        if contract is not None:
+            try:
+                body = load(intent['task']['input'])
+                inputs = (body.get('assignment_inputs', {}) if intent['op'] == 'repair'
+                          else body.get('inputs', body.get('payload', {})))
+                payload = output_payload(proof['text'], contract, inputs)
+            except (ValueError, TypeError, KeyError, RecursionError):
+                return self.record(task_id, {**ack, 'state': 'failed', 'reason': 'invalid_role_output'})
+            ack['contract_sha256'] = contract['sha256']
         try:
             if intent['op'] == 'repair':
-                payload = load(wire['text'])
+                if contract is None:
+                    payload = load(proof['text'])
                 artifact = self.h.publish(self.producer, self.slot, payload,
                                           base_revision=intent['base_revision'], request_id=intent['request_id'])
                 ack.update(state='published', request_id=intent['request_id'],
                            base_revision=intent['base_revision'], artifact=artifact)
             else:
-                state = self.h.state(self.consumer)
-                if state_of(state) == 'completed':
-                    if state.get('receipt_id', receipt_id) != receipt_id:
+                if contract is not None:
+                    ack['artifact'] = self.h.finish_with_output(self.consumer, receipt_id, contract['kind'], payload)
+                elif state_of(state := self.h.state(self.consumer)) == 'completed':
+                    if state.get('receipt_id') != receipt_id:
                         raise ValueError('completion receipt mismatch')
                 elif state_of(self.h.finish(self.consumer, receipt_id)) != 'completed':
                     raise ValueError('handoff store did not complete consumer')
@@ -338,14 +398,16 @@ class Runner:
             return {'state': 'uncertain', 'reason': 'verified receipt could not be applied', **ref}
         # A crash before this commit leaves a reconcilable intent. Publication
         # replays exactly; a completed consume is not finished a second time.
+        return self.record(task_id, ack)
+
+    def record(self, task_id, ack):
         with self.db:
             self.db.execute('UPDATE jobs SET ack=? WHERE task_id=? AND ack IS NULL', (dump(ack), task_id))
         return ack
 
 
 def invoke(args, doc):
-    plan = parse(doc, args.backend)
-    encoded = dump(plan)
+    requested = parse(doc, args.backend, pin=False)
     directory = Path(args.state).resolve()
     binary = Path(args.runtime).resolve(strict=True)
     status_only = doc['op'] == 'status'
@@ -354,9 +416,10 @@ def invoke(args, doc):
     if status_only:
         if not db_path.is_file() or not handoffs_path.is_file():
             raise ValueError('no existing handoff state')
+        if not (directory / 'run-identity.json').exists():
+            raise ValueError('no existing run identity')
     else:
         directory.mkdir(parents=True, exist_ok=True)
-    actor = plan['consumer' if doc['op'] == 'consume' else 'producer']
     db_target = db_path.as_uri() + '?mode=ro' if status_only else db_path
     with owner(directory), closing(sqlite3.connect(db_target, uri=status_only)) as db:
         if (directory / 'runtime').is_symlink():
@@ -372,9 +435,17 @@ def invoke(args, doc):
         row = db.execute('SELECT run_id, plan FROM manifest WHERE id=1').fetchone()
         if status_only and row is None:
             raise ValueError('no existing handoff manifest')
-        if row is not None and row[1] != encoded:
-            raise ValueError('plan differs from the immutable manifest')
-        run_id = ident(load_identity(directory)['run_id'], 'runtime run ID')
+        if row is None:
+            plan = parse(doc, args.backend)
+        else:
+            plan = load(row[1])
+            comparable = {**plan, **{side: {k: v for k, v in plan[side].items() if k != 'contract'}
+                                     for side in ('producer', 'consumer')}}
+            if requested != comparable:
+                raise ValueError('plan differs from the immutable manifest')
+        encoded = dump(plan)
+        actor = plan['consumer' if doc['op'] == 'consume' else 'producer']
+        run_id = ident(load_identity(directory, create=not status_only)['run_id'], 'runtime run ID')
         if row is not None and run_id != row[0]:
             raise ValueError('runtime run differs from the immutable manifest')
 
@@ -389,30 +460,14 @@ def invoke(args, doc):
                     raise ValueError('runtime run differs from the immutable manifest')
             return runtime
 
-        def open_handoffs():
-            if not status_only:
-                return Handoffs(handoffs_path, run_id)
-
-            import threading
-
-            class ReadOnlyHandoffs(Handoffs):
-                def __init__(self):
-                    # Skip the schema DDL in Handoffs.__init__ for status.
-                    self.run_id = run_id
-                    self._lock = threading.RLock()
-                    self._db = sqlite3.connect(
-                        handoffs_path.as_uri() + '?mode=ro', uri=True,
-                        timeout=30, isolation_level=None, check_same_thread=False,
-                    )
-                    self._db.row_factory = sqlite3.Row
-
-            return ReadOnlyHandoffs()
-
+        open_handoffs = Handoffs.open_readonly if status_only else Handoffs
         try:
-            with closing(open_handoffs()) as h:
+            with closing(open_handoffs(handoffs_path, run_id)) as h:
                 runner = Runner(db, h, runtime_for_dispatch, binary, directory, run_id, plan)
                 if not status_only:
-                    h.bind(runner.consumer, runner.slot, runner.producer, plan['required_fields'])
+                    fields = {name: None for name in plan['required_fields']}
+                    fields.update(plan['producer'].get('contract', {}).get('outputs', {}))
+                    h.bind(runner.consumer, runner.slot, runner.producer, fields)
                     if row is None:
                         # The binding commits separately. If the manifest write fails,
                         # rerunning the same plan can reuse the binding without dispatching twice.

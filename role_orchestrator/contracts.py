@@ -1,12 +1,18 @@
 """Bridge v1 validation; independent of LangGraph and telemetry exporters."""
 import hashlib
 import json
+import math
 import re
 
 IDENTIFIER = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z')
 TRACEPARENT = re.compile(r'00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}\Z')
 REQUEST_FIELDS = {'schema_version', 'run_id', 'attempt_id', 'traceparent', 'id', 'role', 'instruction', 'input'}
 STAT_FIELDS = {'submitted', 'succeeded', 'failed', 'rejected', 'maxActive', 'maxQueued', 'workers'}
+MODEL_NAMES = {'Sol': 'gpt-6.2-sol', 'Astra': 'gpt-6.2-astra'}
+
+
+def supported_route(model, effort):
+    return model in MODEL_NAMES.values() and effort in ('low', 'medium', 'high')
 
 
 def attempt_id(run_id, task_id):
@@ -58,6 +64,12 @@ def validate_response(result, request):
 
 
 def strict_json(text):
+    def finite(token):
+        value = float(token)
+        if not math.isfinite(value):
+            raise ValueError('non-finite JSON')
+        return value
+
     def pairs(items):
         result = {}
         for key, value in items:
@@ -65,7 +77,7 @@ def strict_json(text):
                 raise ValueError('duplicate JSON field')
             result[key] = value
         return result
-    return json.loads(text, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('non-finite JSON')))
+    return json.loads(text, object_pairs_hook=pairs, parse_float=finite, parse_constant=finite)
 
 class RequestNotStarted(ValueError):
     """Local validation failed before the first byte could be submitted."""

@@ -202,7 +202,11 @@ class AssignmentCLI(unittest.TestCase):
             [*CLI, '--lab', self.lab, '--revision', revision or self.revision,
              '--member', member, '--task', 'T', '--state', state,
              '--runtime', self.wrapper, '--backend', 'fixture'],
-            expected_exit=expected_exit, env=env, data=b'{"fixture":{"ok":true}}\n',
+            expected_exit=expected_exit, env=env, data=json.dumps({
+                'scenario': {}, 'identity': {}, 'windows': {},
+                'fixture': {'criterion_id': 'duplicate', 'initial_state': {}, 'actions': ['approve'],
+                            'expected_state': 'completed', 'expected_new_dispatches': 1},
+            }).encode(),
         )
         if pre_execution:
             report = self.read_json_object(result.stderr, 'assignment stderr', detail)

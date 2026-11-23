@@ -10,13 +10,15 @@ from opentelemetry.context import Context
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-from .contracts import attempt_id, strict_json, encode_request, validate_response
+from .contracts import attempt_id, strict_json, encode_request, supported_route, validate_response
 from .observability import Observability, MetadataExporter, local_exporter
 
 
-def load_identity(state):
+def load_identity(state, *, create=True):
     path = state / 'run-identity.json'
     if not path.exists():
+        if not create:
+            raise ValueError('no existing run identity')
         if (state / 'runtime' / 'tasks').exists() and any((state / 'runtime' / 'tasks').iterdir()):
             raise ValueError('legacy receipts require a new state directory; no automatic migration')
         identity = {'schema_version': 1, 'run_id': 'r-'+uuid.uuid4().hex, 'trace_id': uuid.uuid4().hex}
@@ -26,7 +28,7 @@ def load_identity(state):
             os.fsync(f.fileno())
     identity = strict_json(path.read_text())
     from .contracts import IDENTIFIER
-    if (set(identity) != {'schema_version', 'run_id', 'trace_id'}
+    if (not isinstance(identity, dict) or set(identity) != {'schema_version', 'run_id', 'trace_id'}
         or type(identity['schema_version']) is not int or identity['schema_version'] != 1
         or not isinstance(identity['run_id'], str) or not IDENTIFIER.fullmatch(identity['run_id'])
         or not isinstance(identity['trace_id'], str) or len(identity['trace_id']) != 32
@@ -45,7 +47,7 @@ class Runtime:
     def __init__(self, binary: str, state: Path, backend: str, codex: str, telemetry_env=None, exporter=None, *, model=None, reasoning_effort=None):
         routing_args = []
         if model is not None or reasoning_effort is not None:
-            if model not in ('gpt-6.2-sol', 'gpt-6.2-astra') or reasoning_effort not in ('low', 'medium', 'high'):
+            if not supported_route(model, reasoning_effort):
                 raise ValueError('unsupported model and reasoning_effort pair')
             routing_args = ['--model', model, '--reasoning-effort', reasoning_effort]
         self.identity = load_identity(state)

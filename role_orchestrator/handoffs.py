@@ -4,6 +4,9 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
+from pathlib import Path
+
+from .handoff_policy import JSON_TYPES, field_condition, field_problems, semantic_key
 
 
 def _json(value):
@@ -16,22 +19,25 @@ def _name(value):
     return value
 
 
-_TYPES = {'object': (dict,), 'array': (list,), 'string': (str,),
-          'integer': (int,), 'number': (int, float), 'boolean': (bool,),
-          'null': (type(None),)}
 _ALIASES = {dict: 'object', list: 'array', str: 'string', int: 'integer',
             float: 'number', bool: 'boolean', type(None): 'null'}
 
 
 class Handoffs:
-    def read(self, producer, kind):
-        """Return the checked current artifact and payload, or None if absent."""
+    """Run-scoped handoffs. The execution caller owns dispatch and receipt verification."""
+
+    @classmethod
+    def open_readonly(cls, path, run_id):
+        return cls(path, run_id, readonly=True)
+
+    def read(self, producer, kind, *, revision=None):
+        """Read the current or specified immutable revision, or None if absent."""
         with self._tx(write=False):
-            row = self._artifact(producer, kind)
+            row = self._artifact(producer, kind, revision)
             if row is None:
                 return None
             reason, payload = self._inspect(row)
-            if reason:
+            if reason and not (revision is not None and reason == 'stale_input'):
                 raise ValueError('current handoff artifact is not usable: ' + reason)
             return {'artifact': self._ref(row), 'payload': payload}
 
@@ -95,13 +101,14 @@ class Handoffs:
                 inputs[name] = self._read_claimed_ref(ref, name)
             return current, inputs
 
-    """Run-scoped handoffs. The execution caller owns dispatch and receipt verification."""
-
-    def __init__(self, path, run_id):
+    def __init__(self, path, run_id, *, readonly=False):
         self.run_id = _name(run_id)
         self._lock = threading.RLock()
-        self._db = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
+        target = Path(path).resolve().as_uri() + '?mode=ro' if readonly else path
+        self._db = sqlite3.connect(target, uri=readonly, timeout=30, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        if readonly:
+            return
         self._db.executescript('''
         CREATE TABLE IF NOT EXISTS bindings (
           run TEXT, consumer TEXT, slot TEXT, producer TEXT, fields TEXT,
@@ -158,7 +165,7 @@ class Handoffs:
             if not all(p.strip() for p in _name(path).split('.')):
                 raise ValueError('invalid field path')
             kind = _ALIASES.get(kind, kind)
-            if kind is not None and kind not in _TYPES:
+            if kind is not None and kind not in JSON_TYPES:
                 raise ValueError('unknown JSON field type')
             fields[path] = kind
         key = self.run_id, consumer, slot
@@ -228,6 +235,22 @@ class Handoffs:
     def _unit(r):
         return r['run'], r['target'], r['slot'], r['base']
 
+    @classmethod
+    def _repair_task_id(cls, request):
+        return hashlib.sha256(_json(cls._unit(request)).encode('utf-8')).hexdigest()
+
+    def repair_task_id(self, request_id, producer, slot):
+        """Resolve active or historical request aliases through the existing primary key."""
+        with self._tx(write=False):
+            request = self._by_request(request_id)
+            if request is None or (request['target'], request['slot']) != (producer, slot):
+                return None
+            return self._repair_task_id(request)
+
+    def _repair_conflict(self, unit):
+        return self._q("SELECT 1 FROM requests WHERE run=? AND target=? AND slot=? AND base=? "
+                       "AND closed=0 AND reason='conflict' LIMIT 1", *unit).fetchone() is not None
+
     def _repair(self, r):
         return self._q('SELECT * FROM repair_intents WHERE run=? AND target=? AND slot=? AND base=?',
                        *self._unit(r)).fetchone()
@@ -261,7 +284,7 @@ class Handoffs:
             if r is None:
                 raise ValueError('unknown repair request')
             unit = self._unit(r)
-            task = hashlib.sha256(_json(unit).encode('utf-8')).hexdigest()
+            task = self._repair_task_id(r)
             def result(state, **detail):
                 return dict(state=state, repair_task_id=task, **detail)
             if r['target'].startswith('external:'):
@@ -273,6 +296,10 @@ class Handoffs:
             if (r['closed'] or (r['base'], r['sha256']) !=
                     ((current['revision'], current['sha256']) if current else (0, None))):
                 return result('blocked', reason='superseded')
+            # A v0.1.0 conflict could be recorded only on the second request.
+            # All aliases claim the same repair task, so none may dispatch it.
+            if self._repair_conflict(unit):
+                return result('blocked', reason='conflict', resolver=r['consumer'])
             if r['reason'] in ('slot_limit', 'run_limit'):
                 binding = self._q('SELECT * FROM bindings WHERE run=? AND consumer=? AND slot=?',
                                   self.run_id, r['consumer'], r['slot']).fetchone()
@@ -373,18 +400,31 @@ class Handoffs:
         run, encoded = self.run_id, _json(condition)
         key = run, consumer, slot, target, base, encoded
         old = self._q('SELECT * FROM requests WHERE run=? AND consumer=? AND slot=? AND target=? AND base=? AND condition=?', *key).fetchone()
-        if old and (old['closed'] or old['reason'] not in ('slot_limit', 'run_limit')):
-            return self._detail(old)
         external = target.startswith('external:')
         reason = None
         if condition[0]:
-            peers = self._q('SELECT condition FROM requests WHERE run=? AND target=? AND slot=? AND base=? AND closed=0',
+            peers = self._q('SELECT * FROM requests WHERE run=? AND target=? AND slot=? AND base=? AND closed=0 ORDER BY rowid',
                             run, target, slot, base)
             for peer in peers:
-                other = json.loads(peer[0])
-                if other[:3] == condition[:3] and other[4:] != condition[4:]:
+                other = json.loads(peer['condition'])
+                if not other[0] or other[1:3] != condition[1:3]:
+                    continue
+                if semantic_key(other) == semantic_key(condition):
+                    if old is None and peer['consumer'] == consumer:
+                        old = peer
+                else:
                     reason = 'conflict'
-                    break
+            if reason and self._q('SELECT 1 FROM repair_intents WHERE run=? AND target=? AND slot=? AND base=?',
+                                  run, target, slot, base).fetchone() is None:
+                # Preserve in-flight intents and their original publication authority.
+                self._q("UPDATE requests SET state='blocked', reason='conflict' WHERE run=? AND target=? "
+                        "AND slot=? AND base=? AND closed=0", run, target, slot, base)
+                if old:
+                    old = self._by_request(old['id'])
+        if old and (old['closed'] or old['reason'] not in ('slot_limit', 'run_limit')):
+            return self._detail(old)
+        if not reason and self._repair_conflict((run, target, slot, base)):
+            reason = 'conflict'
         if not reason:
             reason = 'external' if external else 'cycle' if self._cycle(consumer, target) else None
         if old:
@@ -397,29 +437,15 @@ class Handoffs:
                 'blocked' if reason else 'needs_revision', reason)
         return self._detail(self._q('SELECT * FROM requests WHERE id=?', rid).fetchone())
 
-    @staticmethod
-    def _field_problem(payload, fields):
-        for path, kind in fields.items():
-            value = payload
-            for part in path.split('.'):
-                if isinstance(value, dict) and part in value:
-                    value = value[part]
-                elif isinstance(value, list) and part.isascii() and part.isdecimal() and len(part) < 20 and int(part) < len(value):
-                    value = value[int(part)]
-                else:
-                    return path, 'missing', kind or 'present'
-            if kind and type(value) not in _TYPES[kind]:
-                return path, type(value).__name__, kind
-        return None
+    def validate(self, consumer, slot, criterion='structure', field=None, observed=None, required=None, check=None,
+                 *, reviewed_ref=None, payload_check=None):
+        return self._validate(consumer, slot, criterion, field, observed, required, check, reviewed_ref, False, payload_check)
 
-    def validate(self, consumer, slot, criterion='structure', field=None, observed=None, required=None, check=None, *, reviewed_ref=None):
-        return self._validate(consumer, slot, criterion, field, observed, required, check, reviewed_ref, False)
-
-    def accept_review(self, consumer, slot, reviewed_ref):
+    def accept_review(self, consumer, slot, reviewed_ref, *, payload_check=None):
         """Attest that this revision satisfies all earlier semantic feedback for this slot."""
-        return self._validate(consumer, slot, 'structure', None, None, None, None, reviewed_ref, True)
+        return self._validate(consumer, slot, 'structure', None, None, None, None, reviewed_ref, True, payload_check)
 
-    def _validate(self, consumer, slot, criterion, field, observed, required, check, reviewed_ref, accepting):
+    def _validate(self, consumer, slot, criterion, field, observed, required, check, reviewed_ref, accepting, payload_check):
         _name(consumer), _name(slot), _name(criterion)
         feedback = (field, observed, required, check)
         semantic = criterion != 'structure' or any(v is not None for v in feedback)
@@ -455,10 +481,22 @@ class Handoffs:
                 return self._request(b, a, [True, criterion, *feedback])
             if a is None:
                 return self._request(b, a, [False, 'structure', '$', 'missing', 'publish ' + slot, 'artifact is stored and valid'])
-            problem = self._field_problem(payload, json.loads(b['fields']))
-            if problem:
-                path, found, expected = problem
-                return self._request(b, a, [False, 'structure', path, found, 'provide ' + path, 'field is ' + expected])
+            problems = field_problems(payload, json.loads(b['fields']))
+            if problems:
+                condition = field_condition(problems)
+                if len(problems) > 1:
+                    # Upgrade a v0.1.0 first-field notification in place. Keep
+                    # the same request ID and any already-pinned dispatch draft.
+                    self._q('UPDATE requests SET condition=? WHERE run=? AND consumer=? AND slot=? '
+                            'AND base=? AND condition=? AND closed=0',
+                            _json(condition), *key, a['revision'], _json(field_condition(problems[:1])))
+                return self._request(b, a, condition)
+            if payload_check is not None:
+                try:
+                    payload_check(payload)
+                except ValueError as exc:
+                    return self._request(b, a, [False, 'role-output', '$', str(exc), 'correct role output',
+                                                'output satisfies the pinned producer contract and assignment'])
             pending = self._requests(consumer, slot)
             open_now = [r for r in pending if r['base'] == a['revision']]
             if open_now:
@@ -529,4 +567,27 @@ class Handoffs:
                 raise ValueError('a different receipt was already recorded')
             self._q('UPDATE executions SET receipt=? WHERE run=? AND consumer=?', receipt_id, self.run_id, consumer)
             return 'completed'
+
+    def finish_with_output(self, consumer, receipt_id, kind, payload):
+        """Publish the first output from the pinned inputs and complete its execution together."""
+        _name(consumer), _name(receipt_id), _name(kind)
+        raw = _json(payload).encode('utf-8')
+        digest = hashlib.sha256(raw).hexdigest()
+        with self._tx():
+            execution = self._execution(consumer)
+            if execution is None:
+                raise ValueError('no execution intent')
+            output = self._artifact(consumer, kind, revision=1)
+            if execution['receipt'] is not None:
+                if (execution['receipt'] != receipt_id or output is None or output['request_id'] is not None
+                        or output['payload'] != raw or output['sha256'] != digest
+                        or output['input_refs'] != execution['input_refs'] or self._inspect(output)[0] == 'integrity'):
+                    raise ValueError('completed output does not match the pinned receipt and payload')
+                return self._ref(output)
+            if output is not None:
+                raise ValueError('output slot was already published')
+            self._q('INSERT INTO artifacts VALUES (?,?,?,?,?,?,?,?)', self.run_id, consumer, kind,
+                    1, digest, raw, execution['input_refs'], None)
+            self._q('UPDATE executions SET receipt=? WHERE run=? AND consumer=?', receipt_id, self.run_id, consumer)
+            return self._ref(self._artifact(consumer, kind, revision=1))
 

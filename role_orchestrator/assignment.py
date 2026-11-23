@@ -1,46 +1,33 @@
 import argparse
-import base64
 from contextlib import redirect_stdout
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
 
-from .contracts import attempt_id
+from .contracts import IDENTIFIER as ID, attempt_id, strict_json
+from .attempts import AttemptReader, terminal_failure
+from .role_contracts import canonical, digest, output_payload, validate_inputs
+from .roster import AssignmentError, make_plan
 from .runtime import Runtime, load_identity
 
 VERSION = 2
 PLAN = 'assignment-v2.plan.json'
 VERDICT = 'assignment-v2.verdict.json'
-ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
-MODELS = {'Sol': 'gpt-6.2-sol', 'Astra': 'gpt-6.2-astra'}
-EFFORTS = {'low', 'medium', 'high'}
-
-
-class AssignmentError(Exception):
-    pass
 
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
-def unique_object(pairs):
-    result = dict(pairs)
-    if len(result) != len(pairs):
-        raise ValueError('duplicate key')
-    return result
-
-
 def decode(data):
-    value = json.loads(data, object_pairs_hook=unique_object)
+    value = strict_json(data)
     if not isinstance(value, dict):
         raise ValueError('expected JSON object')
-    encode(value)  # Reject non-finite numbers, including overflowing exponents.
     return value
 
 
@@ -59,68 +46,6 @@ def read_input():
     return serialized
 
 
-def literal(cell):
-    return cell[1:-1].strip() if len(cell) >= 2 and cell[0] == cell[-1] == '`' else cell
-
-
-def select_row(markdown, key, code, handoff=False):
-    found = []
-    fence = ''
-    for line in map(str.strip, markdown.splitlines()):
-        mark = re.match(r'`{3,}|~{3,}', line)
-        if fence:
-            if mark and mark[0].startswith(fence) and not line[mark.end():].strip():
-                fence = ''
-            continue
-        if mark:
-            fence = mark[0]
-        elif line.startswith('|'):
-            cells = re.split(r'(?<!\\)\|', line)[1:]
-            label = cells[0].partition('/')[0] if handoff else cells[0]
-            if literal(label.strip()) == key:
-                found.append([cell.strip().replace(r'\|', '|') for cell in cells[:-1]] if cells[-1] == '' else [])
-    if len(found) != 1 or len(found[0]) != 4 or not all(found[0]):
-        raise AssignmentError(code)
-    return found[0]
-
-
-def git(lab, *args):
-    try:
-        return subprocess.run(
-            ['git', '--no-pager', '--no-replace-objects', '-C', str(lab), *args],
-            check=True, capture_output=True, timeout=15,
-            env={**os.environ, 'GIT_NO_LAZY_FETCH': '1', 'GIT_TERMINAL_PROMPT': '0'},
-        ).stdout.decode('utf-8')
-    except (OSError, subprocess.SubprocessError, UnicodeError):
-        raise AssignmentError('lab_revision_read_failed') from None
-
-
-def make_plan(args):
-    revision = args.revision.lower()
-    if (not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', revision)
-            or git(args.lab, 'rev-parse', '--verify', revision + '^{commit}').strip() != revision):
-        raise AssignmentError('full_commit_sha_required')
-    if not ID.fullmatch(args.member) or not ID.fullmatch(args.task):
-        raise AssignmentError('invalid_member_or_task_id')
-    roster = git(args.lab, 'show', revision + ':docs/team/roster.md')
-    _, name, duty, handoff = select_row(roster, args.member, 'invalid_or_ambiguous_roster_row')
-    handoff = literal(handoff)
-    if not ID.fullmatch(handoff):
-        raise AssignmentError('invalid_handoff_id')
-    specs = git(args.lab, 'show', revision + ':docs/features/development-handoffs.md')
-    label, inputs, outputs, desired = select_row(specs, handoff, 'invalid_or_ambiguous_handoff_row', handoff=True)
-    title = label.partition('/')[2].strip()
-    if not title:
-        raise AssignmentError('invalid_handoff_title')
-    model, sep, effort = map(str.strip, desired.partition('/'))
-    if not sep or model not in MODELS or effort not in EFFORTS:
-        raise AssignmentError('unsupported_desired_model_or_effort')
-    return dict(version=VERSION, revision=revision, backend=args.backend, member_id=args.member,
-                task_id=args.task, handoff_id=handoff, expected_role_version='v1',
-                instruction=f'{title}\n담당: {name} — {duty}\n입력: {inputs}\n산출물: {outputs}',
-                desired={'model': MODELS[model], 'effort': effort})
-
-
 def publish(path, value, directory_fd):
     with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent) as tmp:
         tmp.write(encode(value) + '\n')
@@ -136,30 +61,44 @@ def matches(obj, **expected):
     )
 
 
-def verify(binary, state, ids, plan, request):
-    reply = subprocess.run(
-        [binary, '--state', str(state / 'runtime'), '--run-id', ids['run_id'],
-         '--inspect-attempt', ids['attempt_id']], check=True, capture_output=True, timeout=15,
-    )
-    evidence = decode(reply.stdout)
-    if not matches(evidence, version=1, status='observed', **ids):
-        raise AssignmentError('inspect_envelope_mismatch')
-    wire = decode(base64.b64decode(evidence['wire'], validate=True))
-    receipt = decode(base64.b64decode(evidence['receipt'], validate=True))
-    if not matches(wire, schema_version=1, **ids, **request):
-        raise AssignmentError('wire_request_mismatch')
-    task = {key: request[key] for key in ('id', 'role', 'input')}
-    if receipt.get('status') != 'succeeded' or not matches(receipt.get('task'), **task):
-        raise AssignmentError('receipt_task_or_status_mismatch')
+def observe(binary, state, ids, plan, request=None):
+    if request is None:
+        if not plan.get('input_sha256'):
+            return dict(status='uncertain', reason='historical_input_unavailable')
+        request = dict(id=plan['task_id'], role=plan['member_id'], instruction=plan['instruction'])
+    try:
+        proof = AttemptReader(binary, state, ids['run_id']).bound(
+            ids['attempt_id'], request, plan.get('input_sha256'))
+        if proof is None:
+            return dict(status='uncertain', reason='attempt_receipt_absent')
+        receipt, receipt_hash = proof
+        failure = terminal_failure(receipt)
+    except (ValueError, TypeError, KeyError, OSError, subprocess.SubprocessError):
+        return dict(status='uncertain', reason='attempt_evidence_unavailable_or_invalid')
+    if failure:
+        return dict(status='failed', reason=failure, receipt_sha256=receipt_hash)
+    if receipt.get('status') != 'succeeded':
+        return dict(status='uncertain', reason='attempt_not_terminal')
     result = receipt.get('result')
     actor = dict(actual_member_id=plan['member_id'], actual_role_version=plan['expected_role_version'])
     for key, expected in actor.items():
         actual = result.get(key) if isinstance(result, dict) else None
         if actual is None or actual == '':
-            raise AssignmentError(key + '_missing')
+            return dict(status='failed', reason=key + '_missing')
         if actual != expected:
-            raise AssignmentError(key + '_mismatch')
-    return actor
+            return dict(status='failed', reason=key + '_mismatch')
+    verdict = dict(status='succeeded', receipt_sha256=receipt_hash, **actor)
+    contract = plan.get('contract')
+    if contract is not None:
+        try:
+            payload = output_payload(result.get('text'), contract, decode(receipt['task']['input']))
+        except (ValueError, TypeError, KeyError, RecursionError):
+            return dict(status='failed', reason='invalid_role_output', receipt_sha256=receipt_hash)
+        verdict['artifact'] = dict(kind=contract['kind'], payload=payload, sha256=digest(canonical(payload)),
+            output_sha256=digest(result['text'].encode()),
+            contract_sha256=contract['sha256'], input_sha256=digest(receipt['task']['input'].encode()),
+            receipt_sha256=receipt_hash, member_id=plan['member_id'], task_id=plan['task_id'], **ids)
+    return verdict
 
 
 def assess(binary, state, ids, plan, request):
@@ -173,17 +112,17 @@ def assess(binary, state, ids, plan, request):
         if not matches(reply, status='succeeded'):
             raise ValueError('unconfirmed runtime response')
     except Exception:
-        return dict(status='failed', reason='runtime_success_unconfirmed')
-    try:
-        return dict(status='succeeded', **verify(binary, state, ids, plan, request))
-    except AssignmentError as exc:
-        return dict(status='failed', reason=str(exc))
-    except Exception:
-        return dict(status='failed', reason='attempt_evidence_unavailable_or_invalid')
+        pass  # Transport or teardown can fail after the runtime has persisted the outcome.
+    return observe(binary, state, ids, plan, request)
 
 
 def run(args):
-    payload, plan = read_input(), make_plan(args)
+    payload, plan = read_input(), make_plan(args, VERSION)
+    if plan['contract'] is not None:
+        try:
+            validate_inputs(decode(payload), plan['contract'])
+        except ValueError as exc:
+            raise AssignmentError(str(exc)) from None
     state, binary = args.state.absolute(), str(args.runtime.resolve())
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -197,6 +136,7 @@ def run(args):
         run_id = load_identity(state)['run_id']
         ids = dict(run_id=run_id, attempt_id=attempt_id(run_id, args.task))
         plan.update(ids)
+        plan['input_sha256'] = hashlib.sha256(payload.encode('utf-8')).hexdigest()
         publish(state / PLAN, plan, fd)
         request = dict(id=args.task, role=args.member, instruction=plan['instruction'], input=payload)
         verdict = dict(version=VERSION, **ids, **assess(binary, state, ids, plan, request),
@@ -209,7 +149,7 @@ def run(args):
         os.close(fd)
 
 
-def status(state):
+def status(state, binary=None):
     try:
         plan = decode((state / PLAN).read_bytes())
     except FileNotFoundError:
@@ -222,6 +162,15 @@ def status(state):
         verdict = None
     if verdict is not None and not matches(verdict, version=VERSION, run_id=plan['run_id'], attempt_id=plan['attempt_id']):
         raise AssignmentError('verdict_does_not_match_plan')
+    # Older plans do not pin the input. Keep their original incomplete state
+    # visible rather than attributing an unverifiable receipt to them.
+    if (binary is not None and 'input_sha256' in plan
+            and (verdict is None or verdict.get('status') == 'uncertain')):
+        ids = {key: plan[key] for key in ('run_id', 'attempt_id')}
+        result = observe(str(binary.resolve()), state, ids, plan)
+        verdict = dict(version=VERSION, **ids, **result,
+                       requested_model=plan['desired']['model'], requested_effort=plan['desired']['effort'],
+                       observed_model=None, observed_effort=None)
     print(encode(dict(plan=plan, verdict=verdict)))
     return 0
 
@@ -231,16 +180,19 @@ def main(argv=None):
     reading = argv[:1] == ['status']
     parser = argparse.ArgumentParser(prog='python -m role_orchestrator.assignment' + (' status' if reading else ''))
     parser.add_argument('--state', required=True, type=Path)
-    if not reading:
+    if reading:
+        parser.add_argument('--runtime', type=Path, help='recheck incomplete evidence without submitting work')
+    else:
         parser.epilog = 'Read-only lookup: python -m role_orchestrator.assignment status --state PATH'
         for flag in ('lab', 'runtime'):
             parser.add_argument('--' + flag, required=True, type=Path)
         for flag in ('revision', 'member', 'task'):
             parser.add_argument('--' + flag, required=True)
         parser.add_argument('--backend', required=True, choices=('fixture', 'codex'))
+        parser.add_argument('--profile', default='lab-v1', choices=('lab-v1', 'development-patch-v1'))
     args = parser.parse_args(argv[1:] if reading else argv)
     try:
-        return status(args.state) if reading else run(args)
+        return status(args.state, args.runtime) if reading else run(args)
     except AssignmentError as exc:
         print(encode({'error': str(exc)}), file=sys.stderr)
     except (Exception, KeyboardInterrupt):

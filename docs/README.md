@@ -10,6 +10,7 @@
 | SMS 수신, 체크포인트·ack 순서, 지표와 모듈 책임 | [SMS 워크플로 구현](workflow-implementation.md) · [v1 기준 설계](planning/workflow-metrics-v1.md) |
 | 관측 범위, trace 전파 설계와 참고 근거 | [관측 설계](planning/observability.md) · [참고 자료](planning/sources.md) |
 | 작업 계약과 후속 조치의 기록 범위 | [후속 작업 제안](work-contract-proposals.md) |
+| 개발 역할 배정·산출물 수락·중단 후 조회 | [v0.1.1 개발 인계 계약](features/development-handoff.md) |
 | 구현 후보와 후속 범위 | [기회 검토](planning/opportunities.md) |
 
 ## 실행과 검증
