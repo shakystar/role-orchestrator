@@ -27,3 +27,6 @@
 
 - **네 저장소 기본 브랜치의 통합 검증 기록**은 [agent-eval 이슈 #1](https://github.com/shakystar/agent-eval/issues/1)에서 추적한다. 해당 조합의 실행이 끝나면 사용한 네 커밋, 실제 결과, 재현 명령과 증거 링크를 연결한다.
 - **불확실한 실행의 복구 절차**는 현재 [Bridge 계약](protocol.md#state-ownership-and-crash-boundary)에 재전달 차단 조건까지 기록돼 있다. 운영자가 결과를 대사하고 재개할 수 있는 절차는 복구 방식을 확정한 뒤 문서화한다.
+
+
+[승인된 수정 제안 기능 명세](features/approved-revision.md)

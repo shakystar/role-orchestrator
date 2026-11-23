@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "input": {
+    "run_id": "run-1",
+    "review_task_id": "review-1",
+    "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "action": "revise"
+  },
+  "cases": [
+    {
+      "id": "first",
+      "initial": "empty",
+      "operations": [
+        "approve"
+      ],
+      "expected_status": "completed",
+      "new_dispatches": 1
+    },
+    {
+      "id": "repeat",
+      "initial": "completed",
+      "operations": [
+        "approve",
+        "status"
+      ],
+      "expected_status": "completed",
+      "new_dispatches": 0
+    },
+    {
+      "id": "concurrent",
+      "initial": "empty",
+      "operations": [
+        "approve_concurrently"
+      ],
+      "expected_status": "completed",
+      "new_dispatches": 1
+    },
+    {
+      "id": "interrupted",
+      "initial": "intent_only",
+      "operations": [
+        "approve",
+        "status"
+      ],
+      "expected_status": "uncertain",
+      "new_dispatches": 0
+    },
+    {
+      "id": "recover",
+      "initial": "receipt_only",
+      "operations": [
+        "status"
+      ],
+      "expected_status": "completed",
+      "new_dispatches": 0
+    },
+    {
+      "id": "stale",
+      "initial": "hash_mismatch",
+      "operations": [
+        "approve"
+      ],
+      "expected_status": "conflict",
+      "new_dispatches": 0
+    },
+    {
+      "id": "unsupported",
+      "initial": "complete_proposal",
+      "operations": [
+        "approve"
+      ],
+      "expected_status": "unsupported",
+      "new_dispatches": 0
+    }
+  ]
+}
