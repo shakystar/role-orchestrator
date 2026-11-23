@@ -77,7 +77,19 @@ def strict_json(text):
                 raise ValueError('duplicate JSON field')
             result[key] = value
         return result
-    return json.loads(text, object_pairs_hook=pairs, parse_float=finite, parse_constant=finite)
+    result = json.loads(text, object_pairs_hook=pairs, parse_float=finite, parse_constant=finite)
+    pending = [result]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            if re.search(r'[\ud800-\udfff]', value):
+                raise ValueError('unpaired surrogate in JSON string')
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, dict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+    return result
 
 class RequestNotStarted(ValueError):
     """Local validation failed before the first byte could be submitted."""
