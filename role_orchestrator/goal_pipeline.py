@@ -23,7 +23,7 @@ def validate_goal(case, backend):
             (not isinstance(files, list) or not files or not all(isinstance(f, str) for f in files))):
         raise ValueError('invalid source file selection')
     repairs = {f'{stage}-r{i}' for stage in ('vectors', 'oracle') for i in range(1, VECTOR_REVISIONS + 1)}
-    repairs.update({'reviewer-r1', 'reviewer-r2'})
+    repairs.update({'reviewer-r1', 'reviewer-r2', 'evidence-r1', 'evidence-r2'})
     if 'fixtures' in case and (backend != 'fixture' or not isinstance(case['fixtures'], dict)
             or not set(PLANNING) | {'author', 'reviewer'} <= case['fixtures'].keys()
             or case['fixtures'].keys() - set(PLANNING) - repairs - {'author', 'reviewer', 'evidence'}):

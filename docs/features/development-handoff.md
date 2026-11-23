@@ -23,10 +23,12 @@ python -m role_orchestrator.development_case run \
 ```sh
 python -m role_orchestrator.development_acceptance run \
   --state "$STATE" --runtime "$BRIDGE" --lab "$LAB" --revision "$ROSTER_SHA" \
-  --backend codex --execution execution.json --oracle oracle.py \
+  --backend codex --execution execution.json --candidate-source "$CANDIDATE_REPO" --oracle oracle.py \
   --baseline-log baseline.log --candidate-log candidate.log \
   --role-baseline-log role-baseline.log --role-candidate-log role-candidate.log < goal.json
 ```
+
+실행 기록의 `candidate_commit`, `candidate_tree`, `candidate_build_image`는 시험한 커밋·Git 트리·실행 이미지 다이제스트입니다. 실행기는 기준 커밋에 두 역할의 diff를 적용한 트리와 시험한 커밋의 트리가 일치하는지 대조합니다. 증거 검토자가 미결 사항을 남기면 기존 영수증을 보존하고 같은 패치에 대한 보완 증거를 제출할 수 있습니다. 목표 한 건의 보완 배정은 총 여섯 번까지입니다.
 
 ### 기존 작성·검토 입력
 

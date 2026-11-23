@@ -7,6 +7,8 @@ import sys
 from types import SimpleNamespace
 
 from . import assignment
+from .attempts import AttemptReader
+from .development_build import verify_candidate
 from .development_case import run_case, stage
 from .handoff_runner import owner
 from .role_contracts import canonical, digest, validate_fields
@@ -54,6 +56,38 @@ def bind_execution(case, reviewed, run, oracle, baseline_log, candidate_log, rol
                 log_tails={key: log_tail(path) for key, path in logs.items()})
 
 
+def read_evidence(args, case, inputs, has_build):
+    """Reopen a held decision only for the same patch with updated executor evidence."""
+    for revision in range(3):
+        name = 'evidence' if revision == 0 else f'evidence-r{revision}'
+        state = args.state / name
+        plan_file = state / assignment.PLAN
+        if not plan_file.is_file():
+            return stage(args, case, name, 'acl-009', inputs, profile='lab-v1')
+        plan = assignment.decode(plan_file.read_bytes())
+        intended = dict(inputs, fixture=case['fixtures'][name]) if name in case.get('fixtures', {}) else inputs
+        if plan.get('input_sha256') == digest(canonical(intended)):
+            return stage(args, case, name, 'acl-009', inputs, profile='lab-v1')
+        proof = AttemptReader(args.runtime, state, plan['run_id']).bound(
+            plan['attempt_id'], dict(id=name, role='acl-009', instruction=plan['instruction']), plan['input_sha256'])
+        if proof is None or not has_build:
+            raise ValueError('changed evidence needs a bound prior decision and verified candidate build')
+        prior_inputs = assignment.decode(proof[0]['task']['input'])
+        prior = stage(args, case, name, 'acl-009', prior_inputs, profile='lab-v1')
+        if prior['status'] != 'succeeded':
+            return prior
+        audit = prior['artifact']
+        old_run = prior_inputs['evidence']['execution']
+        run = inputs['evidence']['execution']
+        if (any(old_run[key] != run[key] for key in ('case_id', 'criterion_id', 'base_sha', 'patch_sha256',
+                                                     'author_receipt', 'review_receipt', 'regression_sha256'))
+                or not audit['payload']['unresolved']):
+            raise ValueError('prior evidence decision is not open for this case')
+        inputs = dict(inputs, previous_review={'receipt_sha256': audit['receipt_sha256'],
+                      'unresolved': audit['payload']['unresolved']})
+    return dict(status='blocked', reason='evidence revision limit')
+
+
 def close(args, case):
     # Read back through the public case logic. Inspecting cannot start missing stages.
     inspect = SimpleNamespace(**{**vars(args), 'action': 'status'})
@@ -69,6 +103,9 @@ def close(args, case):
     if not matched_unittest_runs(args.role_baseline_log, args.role_candidate_log):
         return dict(state='blocked', reason='role regression did not show matching nonempty unittest runs '
                     'with baseline assertion failure and candidate success')
+    has_build = args.candidate_source is not None
+    if has_build:
+        verify_candidate(args.candidate_source, reviewed, run)
     evidence_sha = digest(canonical(evidence))
     criterion = run['criterion_id']
     inputs = dict(goal={'text': case['goal'], 'criterion_id': criterion},
@@ -78,13 +115,13 @@ def close(args, case):
                             'objects with criterion_id and status (pass, fail or unverified). Include the '
                             'exact reference string in evidence_refs. List any unresolved concerns.'})
     with owner(args.state):
-        verdict = stage(args, case, 'evidence', 'acl-009', inputs, profile='lab-v1')
+        verdict = read_evidence(args, case, inputs, has_build)
     if verdict['status'] != 'succeeded':
         return dict(state=verdict['status'], stage='evidence', detail=verdict)
     artifact = verdict['artifact']
     summary = artifact['payload']
     criteria = summary['criteria']
-    accepted = (len(criteria) == 1 and assignment.matches(criteria[0], criterion_id=criterion, status='pass')
+    accepted = (has_build and len(criteria) == 1 and assignment.matches(criteria[0], criterion_id=criterion, status='pass')
                 and evidence_sha in summary['evidence_refs'] and not summary['unresolved'])
     return dict(case_id=case['case_id'], state='accepted' if accepted else 'needs_review',
                 evidence=artifact, execution_sha256=digest(canonical(run)), patch_sha256=run['patch_sha256'])
@@ -97,6 +134,7 @@ def main():
                  'role-baseline-log', 'role-candidate-log'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--revision', required=True)
+    parser.add_argument('--candidate-source', type=Path, help='Git checkout containing the tested candidate commit')
     parser.add_argument('--backend', choices=('fixture', 'codex'), required=True)
     args = parser.parse_args()
     try:

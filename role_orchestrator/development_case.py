@@ -42,6 +42,8 @@ def stage(args, case, name, member, inputs, profile=PROFILE):
     if not state.exists():
         if args.action == 'status':
             return {'status': 'not_started'}
+        if 'goal' in case and '-r' in name and sum(p.is_dir() for p in args.state.glob('*-r[12]')) >= 6:
+            return {'status': 'blocked', 'reason': 'case correction limit reached'}
         child = subprocess.run([*command, '--state', str(state), '--runtime', runtime,
                                 '--lab', str(args.lab), '--revision', args.revision,
                                 '--backend', args.backend, '--profile', profile,
