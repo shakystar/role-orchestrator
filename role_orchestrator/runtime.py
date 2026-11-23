@@ -42,7 +42,12 @@ def existing_run_id(state):
 
 class Runtime:
     """Single-owner bridge v1 client. No automatic work retries."""
-    def __init__(self, binary: str, state: Path, backend: str, codex: str, telemetry_env=None, exporter=None):
+    def __init__(self, binary: str, state: Path, backend: str, codex: str, telemetry_env=None, exporter=None, *, model=None, reasoning_effort=None):
+        routing_args = []
+        if model is not None or reasoning_effort is not None:
+            if model not in ('gpt-6.2-sol', 'gpt-6.2-astra') or reasoning_effort not in ('low', 'medium', 'high'):
+                raise ValueError('unsupported model and reasoning_effort pair')
+            routing_args = ['--model', model, '--reasoning-effort', reasoning_effort]
         self.identity = load_identity(state)
         self.closed = False
         self.had_error = False
@@ -62,7 +67,7 @@ class Runtime:
         self.log = (state / 'runtime-status.jsonl').open('a')
         try:
             self.process = subprocess.Popen(
-                [binary, '--state', str(state / 'runtime'), '--backend', backend, '--codex', codex],
+                [binary, '--state', str(state / 'runtime'), '--backend', backend, '--codex', codex, *routing_args],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log,
                 text=True, encoding='utf-8', bufsize=1, env=env,
             )

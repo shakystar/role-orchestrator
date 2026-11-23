@@ -18,7 +18,7 @@ PLAN = 'assignment-v2.plan.json'
 VERDICT = 'assignment-v2.verdict.json'
 ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
 MODELS = {'Sol': 'gpt-6.2-sol', 'Astra': 'gpt-6.2-astra'}
-EFFORTS = {'low', 'medium', 'high', 'xhigh', 'max', 'ultra'}
+EFFORTS = {'low', 'medium', 'high'}
 
 
 class AssignmentError(Exception):
@@ -115,7 +115,7 @@ def make_plan(args):
     model, sep, effort = map(str.strip, desired.partition('/'))
     if not sep or model not in MODELS or effort not in EFFORTS:
         raise AssignmentError('unsupported_desired_model_or_effort')
-    return dict(version=VERSION, revision=revision, backend='fixture', member_id=args.member,
+    return dict(version=VERSION, revision=revision, backend=args.backend, member_id=args.member,
                 task_id=args.task, handoff_id=handoff, expected_role_version='v1',
                 instruction=f'{title}\n담당: {name} — {duty}\n입력: {inputs}\n산출물: {outputs}',
                 desired={'model': MODELS[model], 'effort': effort})
@@ -165,7 +165,7 @@ def verify(binary, state, ids, plan, request):
 def assess(binary, state, ids, plan, request):
     try:
         with open(os.devnull, 'w', encoding='utf-8') as sink, redirect_stdout(sink):
-            runtime = Runtime(binary, state, 'fixture', 'codex')
+            runtime = Runtime(binary, state, plan['backend'], 'codex', model=plan['desired']['model'], reasoning_effort=plan['desired']['effort'])
             try:
                 reply = runtime.execute(request)
             finally:
@@ -183,8 +183,6 @@ def assess(binary, state, ids, plan, request):
 
 
 def run(args):
-    if args.backend == 'codex':
-        raise AssignmentError('live_execution_refused_until_m2_model_effort_support')
     payload, plan = read_input(), make_plan(args)
     state, binary = args.state.absolute(), str(args.runtime.resolve())
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -201,7 +199,9 @@ def run(args):
         plan.update(ids)
         publish(state / PLAN, plan, fd)
         request = dict(id=args.task, role=args.member, instruction=plan['instruction'], input=payload)
-        verdict = dict(version=VERSION, **ids, **assess(binary, state, ids, plan, request))
+        verdict = dict(version=VERSION, **ids, **assess(binary, state, ids, plan, request),
+                       requested_model=plan['desired']['model'], requested_effort=plan['desired']['effort'],
+                       observed_model=None, observed_effort=None)
         publish(state / VERDICT, verdict, fd)
         print(encode(verdict))
         return 0 if verdict['status'] == 'succeeded' else 1
