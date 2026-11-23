@@ -15,6 +15,7 @@ from .workflow.client import Client, ControlError
 
 SUCCESS = ('completed', 'succeeded', 'success')
 PENDING = ('pending', 'queued', 'running', 'submitted', 'accepted', 'ready', 'waiting')
+APPROVED_REVISION = 'approved_revision'
 # Only errors specified as pre-admission validation outcomes are definitive.
 REJECTED = ('conflict', 'unsupported')
 SHA256 = re.compile(r'[0-9a-f]{64}')
@@ -189,11 +190,27 @@ class Approval:
         try:
             receipt = self.receipt(self.task_id, row.project)
             state = receipt['status']
+            if state in SUCCESS or state == 'failed':
+                # receipt() has already checked the task ID and saved project.
+                if (receipt['task']['role'] != 'producer'
+                        or receipt.get('task_kind') != APPROVED_REVISION
+                        or not nonempty(receipt.get('attempt_id'))):
+                    raise InvalidReceipt
             if state in SUCCESS:
-                return self.result('completed', artifact=artifact_ref(receipt))
+                if receipt.get('execution') != 'completed' or receipt.get('failure') is not None:
+                    raise InvalidReceipt
+                artifact = artifact_ref(receipt)
+                if artifact['id'] != f'revision-{self.task_id}.json' or artifact['version'] != 'v1':
+                    raise InvalidReceipt
+                return self.result('completed', artifact=artifact)
             if state == 'failed':
                 failure = receipt.get('failure')
-                code = failure.get('code') if isinstance(failure, dict) else failure
+                # The cooperative store fences as failed only for not_started.
+                if (receipt.get('execution') != 'not_started'
+                        or not isinstance(failure, dict)
+                        or failure.get('execution') != 'not_started'):
+                    raise InvalidReceipt
+                code = failure.get('code')
                 if not isinstance(code, str) or not ERROR_CODE.fullmatch(code):
                     raise InvalidReceipt
                 return self.result('failed', error_code=code)
@@ -237,12 +254,28 @@ class Approval:
         if reviewed['sha256'] != digest:
             return self.result('conflict', error_code='conflict')
 
+        project = review['task']['project']
+        try:
+            checked = self.rpc('revisions.check', review_task_id=self.key[1], artifact_sha256=digest)
+        except ControlError as exc:
+            if exc.code in REJECTED:
+                return self.result(exc.code, error_code=exc.code)
+            code = exc.code if exc.code in ('invalid_request', 'not_found', 'scope_mismatch') else 'check_unavailable'
+            return self.result('unapproved', error_code=code)
+        except RPCUnavailable:
+            return self.result('unapproved', error_code='check_unavailable')
+        if not isinstance(checked, dict) or checked != {
+            'task_id': self.task_id, 'project': project, 'role': 'producer',
+            'task_kind': APPROVED_REVISION,
+        }:
+            return self.result('unapproved', error_code='invalid_check')
+
         self.lock.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd = os.open(self.lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
             if try_flock(fd, fcntl.LOCK_EX):
                 # SQLite uniqueness is checked even when this process owns the lock.
-                if self.insert_intent(digest, review['task']['project']):
+                if self.insert_intent(digest, project):
                     self.submit(digest)
         finally:
             os.close(fd)
