@@ -10,6 +10,7 @@
 | SMS 수신, 체크포인트·ack 순서, 지표와 모듈 책임 | [SMS 워크플로 구현](workflow-implementation.md) · [v1 기준 설계](planning/workflow-metrics-v1.md) |
 | 관측 범위, trace 전파 설계와 참고 근거 | [관측 설계](planning/observability.md) · [참고 자료](planning/sources.md) |
 | 작업 계약과 후속 조치의 기록 범위 | [후속 작업 제안](work-contract-proposals.md) |
+| 개발 역할 배정·산출물 수락·중단 후 조회 | [v0.1.1 개발 인계 계약](features/development-handoff.md) |
 | 구현 후보와 후속 범위 | [기회 검토](planning/opportunities.md) |
 
 ## 실행과 검증
@@ -27,3 +28,10 @@
 
 - **네 저장소 기본 브랜치의 통합 검증 기록**은 [agent-eval 이슈 #1](https://github.com/shakystar/agent-eval/issues/1)에서 추적한다. 해당 조합의 실행이 끝나면 사용한 네 커밋, 실제 결과, 재현 명령과 증거 링크를 연결한다.
 - **불확실한 실행의 복구 절차**는 현재 [Bridge 계약](protocol.md#state-ownership-and-crash-boundary)에 재전달 차단 조건까지 기록돼 있다. 운영자가 결과를 대사하고 재개할 수 있는 절차는 복구 방식을 확정한 뒤 문서화한다.
+
+
+[승인된 수정 제안 기능 명세](features/approved-revision.md)
+
+[독립 리뷰팀 호출과 검증 기록](features/independent-review.md)
+
+[v0.2.0 개발 과제의 독립 리뷰팀 배정 명세](features/review-team-intake.md)

@@ -1,0 +1,33 @@
+{
+  "roster_revision": "72fe33e40fdf505019b41b52679e851ebfbd16df",
+  "task_kind": "criteria",
+  "synthetic_input": true,
+  "backend": "codex",
+  "first_request": [
+    {
+      "run_id": "r-2df3780c5be145cdbac726496ece42ef",
+      "attempt_id": "a-2cb467634fc137085afbfc0c0caec9b6",
+      "actual_member_id": "acl-010",
+      "receipt_sha256": "0725bf0d64a204585c57c916cc258023fa84348b4fa05d5c1f42505decb5e9c3",
+      "decision": "revise"
+    }
+  ],
+  "revised_request": [
+    {
+      "run_id": "r-3cbca929346445f999952cee8b4eab0d",
+      "attempt_id": "a-7e228f941b206cb33d06a491711f753e",
+      "actual_member_id": "acl-010",
+      "receipt_sha256": "8f90aed42fd9293e8d97d8dea4256a433cec09f145ef0e339b976d950a73a16d",
+      "decision": "accept"
+    },
+    {
+      "run_id": "r-d029219629c2443ea7ee091fb01151b0",
+      "attempt_id": "a-922dc142899ca3f17c88c893d0f17610",
+      "actual_member_id": "acl-005",
+      "receipt_sha256": "67b8898f328c14b861f0b1c85f00254de68c780a6bc27e70e1edb47d29b165f3",
+      "decision": "accept"
+    }
+  ],
+  "offline_readonly_replay": "accepted",
+  "scope": "Review of a synthetic acceptance criterion; no product release decision."
+}
