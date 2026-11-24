@@ -118,17 +118,22 @@ def validate_request(value, backend):
                 raise Invalid('invalid fixture member ID')
             validate_output(output, member)
 
+    route = review_route(kind, value['stateful'])
+    overlapping = [member for member in route if member in authors]
+    if overlapping:
+        raise Invalid('self-review is not allowed: ' + ', '.join(overlapping))
+    return route
+
+
+def review_route(kind, stateful):
     if kind == 'patch':
         route = ['acl-012']
-        if value['stateful']:
+        if stateful:
             route.append('acl-013')
         route.extend(('acl-014', 'acl-015'))
     else:
         route = [SPECIALISTS[kind]]
     route.append(FINAL)
-    overlapping = [member for member in route if member in authors]
-    if overlapping:
-        raise Invalid('self-review is not allowed: ' + ', '.join(overlapping))
     return route
 
 

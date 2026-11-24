@@ -103,6 +103,10 @@ def run_case(args, case):
         spec = parent_review.specification(case['review'], args.backend)
         case = {key: value for key, value in case.items() if key != 'review'}
     validate_case(case, args.backend)
+    if spec is not None:
+        conflict = parent_review.author_conflict(case['case_id'], spec, AUTHOR)
+        if conflict is not None:
+            return conflict
     goal_mode = 'goal' in case
     manifest = {'case_id': case['case_id'], 'input_sha256': digest(canonical(case)),
                 'backend': args.backend, 'revision': args.revision, 'profile': 'python-goal-v1' if goal_mode else PROFILE}

@@ -67,6 +67,20 @@ def missing_result(case_id, spec):
             'required': 'case.review.' + spec.missing, 'owner': 'case.review submitter'}
 
 
+def author_conflict(case_id, spec, author_member):
+    if spec.authors is None:
+        return None
+    authors = set(spec.authors)
+    route = broker.review_route(spec.kind, spec.stateful) if spec.missing is None else ()
+    conflicts = (authors - {author_member}) | authors.intersection(route)
+    if not conflicts:
+        return None
+    return {'case_id': case_id, 'revision': spec.revision, 'state': 'needs_input',
+            'reason': 'conflict', 'owner': 'case.review submitter',
+            'required': 'case.review' if author_member in route else 'case.review.authors',
+            'conflicting_ids': sorted(conflicts), 'expected_author': author_member}
+
+
 def save(path, value):
     fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
