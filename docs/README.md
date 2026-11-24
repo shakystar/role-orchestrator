@@ -31,3 +31,5 @@
 
 
 [승인된 수정 제안 기능 명세](features/approved-revision.md)
+
+[독립 리뷰팀 호출과 검증 기록](features/independent-review.md)

@@ -189,7 +189,7 @@ def main(argv=None):
         for flag in ('revision', 'member', 'task'):
             parser.add_argument('--' + flag, required=True)
         parser.add_argument('--backend', required=True, choices=('fixture', 'codex'))
-        parser.add_argument('--profile', default='lab-v1', choices=('lab-v1', 'development-patch-v1'))
+        parser.add_argument('--profile', default='lab-v1', choices=('lab-v1', 'development-patch-v1', 'review-v1'))
     args = parser.parse_args(argv[1:] if reading else argv)
     try:
         return status(args.state, args.runtime) if reading else run(args)

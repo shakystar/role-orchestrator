@@ -42,6 +42,34 @@ def canonical(value):
 
 
 def role_contract(member, role_id=None, profile='lab-v1'):
+    if profile == 'review-v1':
+        review_roles = {
+            'acl-010': 'criteria-review',
+            'acl-011': 'counterexample-review',
+            'acl-012': 'code-review',
+            'acl-013': 'recovery-review',
+            'acl-014': 'reproduction-review',
+            'acl-015': 'provenance-review',
+            'acl-005': 'oracle-reviewer-v2',
+        }
+        if member not in review_roles:
+            raise ValueError(f'Unknown review-v1 member: {member!r}')
+        expected_role = review_roles[member]
+        if role_id is not None and role_id != expected_role:
+            raise ValueError(f'review-v1 member {member!r} requires role {expected_role!r}')
+        spec = {
+            'version': 1,
+            'role': expected_role,
+            'member': member,
+            'profile': profile,
+            'inputs': {'goal': 'string', 'evidence': 'object', 'upstream': 'array'},
+            'kind': 'review-verdict',
+            'outputs': {'decision': 'string', 'reason': 'string', 'owner': 'string'},
+            'source': 'review-v1',
+            'schema_source': 'review-v1',
+        }
+        spec['sha256'] = digest(canonical(spec))
+        return spec
     if profile not in ('lab-v1', 'development-patch-v1'):
         raise ValueError('unknown_development_profile')
     if member not in ROLE_SPECS:
@@ -72,6 +100,14 @@ def role_contract(member, role_id=None, profile='lab-v1'):
 def contract_instruction(instruction, contract):
     if not contract:
         return instruction
+    if contract.get('profile') == 'review-v1':
+        instruction += "\n" + 'Return exactly three fields: decision, reason, and owner. The decision MUST be one of accept, revise, or blocked. In owner, name the accountable person. In reason, explain the decision and state an actionable next step.'
+    if contract.get('profile') == 'review-v1' and contract.get('member') == 'acl-005':
+        instruction += (
+            '\n\nFor the review-v1 final review, synthesize the upstream evidence '
+            'and identify any unresolved grounds in your verdict. '
+            'Never grant or authorize release, even if your decision is accept.'
+        )
     return (instruction + '\nReturn a single JSON object with these required fields and types: '
             + canonical(contract['outputs']).decode() + '. Contract SHA256: ' + contract['sha256'])
 
@@ -114,6 +150,8 @@ def output_payload(text, contract, inputs):
 
 def validate_output(value, contract, inputs):
     validate_fields(value, contract['outputs'])
+    if contract.get('profile') == 'review-v1' and value['decision'] not in ('accept', 'revise', 'blocked'):
+        raise ValueError('review-v1 decision must be accept, revise, or blocked')
     if contract['profile'] == 'development-patch-v1':
         if contract['role'] == 'python-resume-author':
             if (value['base_sha'] != inputs.get('base_sha')
