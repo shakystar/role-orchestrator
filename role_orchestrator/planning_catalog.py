@@ -9,6 +9,7 @@ from .roster import AssignmentError, git
 PROFILE = 'planning-team-v1'
 PATH = 'docs/team/planning-teams.json'
 KEY = re.compile(r'[a-z][a-z0-9]{0,23}(?:-[a-z0-9]{1,12})?')
+TEAM_KEY = re.compile(KEY.pattern + r'(?:-[a-z0-9]{1,12})?')
 
 
 def need(ok, message):
@@ -38,7 +39,8 @@ def load(lab, revision, team_id, expected=None):
     catalog = strict_json(raw)
     need(fields(catalog, 'version teams') and type(catalog['version']) is int
          and catalog['version'] == 1 and isinstance(catalog['teams'], dict), 'invalid_catalog')
-    need(key(team_id) and team_id in catalog['teams'], 'unknown_team')
+    need(isinstance(team_id, str) and TEAM_KEY.fullmatch(team_id)
+         and team_id in catalog['teams'], 'unknown_team')
     team = catalog['teams'][team_id]
     need(fields(team, 'lead members goals max_steps') and type(team['max_steps']) is int
          and 1 <= team['max_steps'] <= 32 and isinstance(team['members'], dict)
