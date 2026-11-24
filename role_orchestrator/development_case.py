@@ -6,7 +6,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from . import assignment, goal_pipeline
+from . import assignment, goal_pipeline, parent_review
 from .attempts import AttemptReader
 from .handoff_runner import owner
 from .role_contracts import canonical, digest, role_contract, validate_fields, validate_inputs
@@ -98,18 +98,26 @@ def correct_review(args, case, inputs, verdict):
 
 
 def run_case(args, case):
+    spec = None
+    if 'review' in case:
+        spec = parent_review.specification(case['review'], args.backend)
+        case = {key: value for key, value in case.items() if key != 'review'}
     validate_case(case, args.backend)
     goal_mode = 'goal' in case
     manifest = {'case_id': case['case_id'], 'input_sha256': digest(canonical(case)),
                 'backend': args.backend, 'revision': args.revision, 'profile': 'python-goal-v1' if goal_mode else PROFILE}
+    if spec and spec.missing and not parent_review.location(args, spec).exists():
+        return parent_review.missing_result(case['case_id'], spec)
     if args.action == 'status' and not args.state.is_dir():
         return {'case_id': case['case_id'], 'state': 'not_started'}
     if args.action == 'run':
         # Resolve every required role before placing the first assignment.
         stages = [(name, member, 'lab-v1') for name, member in goal_pipeline.PLANNING.items()] if goal_mode else []
-        stages.extend([('author', AUTHOR, PROFILE), ('reviewer', REVIEWER, PROFILE)])
-        if goal_mode:
-            stages.append(('evidence', 'acl-009', 'lab-v1'))
+        stages.append(('author', AUTHOR, PROFILE))
+        if spec is None:
+            stages.append(('reviewer', REVIEWER, PROFILE))
+            if goal_mode:
+                stages.append(('evidence', 'acl-009', 'lab-v1'))
         for name, member, profile in stages:
             plan = assignment.make_plan(SimpleNamespace(lab=args.lab, revision=args.revision,
                 member=member, task=name, backend=args.backend, profile=profile))
@@ -117,7 +125,7 @@ def run_case(args, case):
             if plan.get('contract') != expected or plan.get('handoff_id') != expected['role']:
                 raise ValueError('roster does not supply required development role: ' + name)
         args.state.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with owner(args.state):
+    with (parent_review.locked(args.state, args.action == 'status') if spec else owner(args.state)):
         path = args.state / 'case.json'
         if path.exists():
             if assignment.decode(path.read_bytes()) != manifest:
@@ -132,6 +140,11 @@ def run_case(args, case):
                 assignment.publish(path, manifest, fd)
             finally:
                 os.close(fd)
+
+        if spec:
+            resumed = parent_review.reconcile(args, case['case_id'], spec)
+            if resumed is not None:
+                return resumed
 
         report = {'case_id': case['case_id']}
         if goal_mode:
@@ -151,6 +164,9 @@ def run_case(args, case):
         authored = {key: artifact[key] for key in ('task_id', 'member_id', 'run_id', 'attempt_id')}
         authored.update(sha256=artifact['output_sha256'], artifact=artifact['payload'])
         report.update(author=artifact, patch_sha256=patch_hash)
+        if spec:
+            return parent_review.start(args, case['case_id'], spec, criterion,
+                                       author_input, author, patch_hash)
         review_input = {key: author_input[key] for key in ('base_sha', 'source', 'regression')}
         review_input.update(case_id=case['case_id'], criterion=criterion,
                             patch_sha256=patch_hash, authored_revision=authored)
@@ -179,7 +195,8 @@ def main():
         result = run_case(args, case)
         print(assignment.encode(result))
         return 0 if args.action == 'status' or result['state'] in ('accept', 'patch_reviewed') else 1
-    except (assignment.AssignmentError, KeyError, OSError, ValueError, subprocess.SubprocessError) as exc:
+    except (assignment.AssignmentError, parent_review.Hold, KeyError, OSError,
+            ValueError, subprocess.SubprocessError) as exc:
         print(assignment.encode({'state': 'error', 'reason': str(exc)}), file=sys.stderr)
         return 2
 

@@ -77,10 +77,11 @@ def matches(pattern, value):
     return isinstance(value, str) and pattern.fullmatch(value) is not None
 
 
-def validate_output(value):
+def validate_output(value, member=None):
     if not isinstance(value, dict) or set(value) != {'decision', 'reason', 'owner'}:
         raise Invalid('member output must contain exactly decision, reason, and owner')
-    if value['decision'] not in ('accept', 'revise', 'blocked'):
+    decisions = ('accept', 'revise', 'blocked', 'hold') if member == FINAL else ('accept', 'revise', 'blocked')
+    if value['decision'] not in decisions:
         raise Invalid('invalid member decision')
     if (not isinstance(value['reason'], str) or not value['reason'].strip()
             or not isinstance(value['owner'], str) or not value['owner'].strip()):
@@ -115,7 +116,7 @@ def validate_request(value, backend):
         for member, output in value['fixtures'].items():
             if not matches(MEMBER_ID, member):
                 raise Invalid('invalid fixture member ID')
-            validate_output(output)
+            validate_output(output, member)
 
     if kind == 'patch':
         route = ['acl-012']
@@ -177,6 +178,8 @@ def prepare_state(root, directory_fd, request):
         raise Invalid('request changed; use a new state directory')
 
     allowed = {REQUEST_FILE}
+    if 'parent' in request:
+        allowed.add('outcome.json')
     gap = False
     for member in request['route']:
         intent = intent_name(member)
@@ -208,12 +211,13 @@ def validate_receipt(value, member):
     canonical_payload = canonical(payload)
     if hashlib.sha256(canonical_payload).hexdigest() != artifact['sha256']:
         raise Invalid('assignment artifact payload hash does not match')
-    validated_payload = validate_output(payload)
+    validated_payload = validate_output(payload, member)
     return {
         'actual_member_id': member,
         'artifact': {'payload': validated_payload,
                      'sha256': artifact['sha256']},
         'receipt_sha256': value['receipt_sha256'],
+        **{key: value[key] for key in ('run_id', 'attempt_id') if key in value},
     }
 
 
@@ -236,8 +240,11 @@ def call_assignment(request, member, member_dir, assignment_input, reconcile):
                                    stderr=subprocess.PIPE, check=False)
     except OSError as exc:
         raise Hold(f'{operation} could not be run') from exc
+    if not reconcile and 'parent' in request:
+        return call_assignment(request, member, member_dir, assignment_input, True)
     if completed.returncode != 0:
         raise Hold(f'{operation} exited with code {completed.returncode}')
+    attempt = {}
     try:
         result = decode(completed.stdout)
         if reconcile:
@@ -245,8 +252,9 @@ def call_assignment(request, member, member_dir, assignment_input, reconcile):
                 raise Invalid('assignment status is not an object')
             plan = result.get('plan')
             verdict = result.get('verdict')
-            if not isinstance(plan, dict) or not isinstance(verdict, dict):
-                raise Invalid('assignment status is missing its plan or verdict')
+            if not isinstance(plan, dict):
+                raise Invalid('assignment status is missing its plan')
+            verdict = verdict if isinstance(verdict, dict) else {}
             expected_plan = {
                 'input_sha256': hashlib.sha256(canonical(assignment_input)).hexdigest(),
                 'member_id': member,
@@ -260,14 +268,22 @@ def call_assignment(request, member, member_dir, assignment_input, reconcile):
             contract = plan.get('contract')
             if not isinstance(contract, dict) or contract.get('profile') != 'review-v1':
                 raise Invalid('assignment plan has the wrong contract profile')
+            if 'parent' in request and any(plan.get(key) != value for key, value in
+                                           request['parent']['assignment_contracts'][member].items()):
+                raise Invalid('assignment plan differs from the pinned roster contract')
             for field in ('run_id', 'attempt_id'):
                 identifier = plan.get(field)
-                if not isinstance(identifier, str) or not identifier.strip() or verdict.get(field) != identifier:
+                if not isinstance(identifier, str) or not identifier.strip():
                     raise Invalid(f'assignment verdict {field} does not match the plan')
+            attempt = {field: plan[field] for field in ('run_id', 'attempt_id')}
+            if any(verdict.get(field) != identifier for field, identifier in attempt.items()):
+                raise Invalid('assignment verdict identifiers do not match the plan')
             result = verdict
         return validate_receipt(result, member)
     except (ValueError, RecursionError) as exc:
-        raise Hold(f'{operation} did not yield a valid succeeded receipt: {exc}') from exc
+        error = Hold(f'{operation} did not yield a valid succeeded receipt: {exc}')
+        error.attempt = attempt
+        raise error from exc
 
 
 def run_member(root, directory_fd, names, request, member, prior):
@@ -301,25 +317,46 @@ def run_member(root, directory_fd, names, request, member, prior):
     return call_assignment(request, member, member_dir, assignment_input, False)
 
 
-def run_review(root, request):
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+def run_review(root, request, *, readonly=False):
+    if readonly and not root.exists():
+        return {'status': 'pending', 'artifacts': []}, 0
+    if not readonly:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        fcntl.flock(directory_fd, fcntl.LOCK_SH if readonly else fcntl.LOCK_EX)
+        if readonly and not (root / REQUEST_FILE).exists() and not any(root.iterdir()):
+            return {'status': 'pending', 'artifacts': []}, 0
         names = prepare_state(root, directory_fd, request)
+        def finish(result, code):
+            if 'parent' in request and 'outcome.json' not in names and not readonly:
+                write_record(root / 'outcome.json', result, directory_fd)
+            return result, code
+
         receipts = []
         for member in request['route']:
+            if readonly and intent_name(member) not in names:
+                if 'outcome.json' in names:
+                    return {'status': 'hold', 'reason': 'terminal dispatch history is incomplete',
+                            'artifacts': receipts}, 3
+                return {'status': 'pending', 'artifacts': receipts}, 0
             try:
                 receipt = run_member(root, directory_fd, names, request, member, receipts)
             except (Hold, OSError) as exc:
-                return {'status': 'hold', 'member_id': member, 'reason': str(exc),
-                        'artifacts': receipts}, 3
+                attempt = getattr(exc, 'attempt', {})
+                if not attempt and 'outcome.json' in names:
+                    saved = read_record(root / 'outcome.json')
+                    attempt = next((a for a in saved['artifacts']
+                                    if a['actual_member_id'] == member), saved.get('attempt', {}))
+                return finish({'status': 'hold', 'member_id': member, 'reason': str(exc),
+                               'attempt': {k: attempt[k] for k in ('run_id', 'attempt_id', 'receipt_sha256')
+                                           if k in attempt}, 'artifacts': receipts}, 3)
             receipts.append(receipt)
             output = receipt['artifact']['payload']
             if output['decision'] != 'accept' or member == FINAL:
-                status = 'accepted' if output['decision'] == 'accept' else 'feedback'
-                return {'status': status, 'member_id': member, 'artifacts': receipts,
-                        **output}, 0
+                status = {'accept': 'accepted', 'hold': 'hold'}.get(output['decision'], 'feedback')
+                return finish({'status': status, 'member_id': member, 'artifacts': receipts,
+                               **output}, 3 if status == 'hold' else 0)
         raise Hold('review ended without a final member')
     finally:
         os.close(directory_fd)
