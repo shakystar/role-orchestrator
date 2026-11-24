@@ -33,3 +33,5 @@
 [승인된 수정 제안 기능 명세](features/approved-revision.md)
 
 [독립 리뷰팀 호출과 검증 기록](features/independent-review.md)
+
+[v0.2.0 개발 과제의 독립 리뷰팀 배정 명세](features/review-team-intake.md)
