@@ -73,7 +73,8 @@ def observe(binary, state, ids, plan, request=None):
             return dict(status='uncertain', reason='attempt_receipt_absent')
         receipt, receipt_hash = proof
         failure = terminal_failure(receipt)
-    except (ValueError, TypeError, KeyError, OSError, subprocess.SubprocessError):
+    except (ValueError, TypeError, KeyError, OSError, AttributeError, RecursionError,
+            subprocess.SubprocessError):
         return dict(status='uncertain', reason='attempt_evidence_unavailable_or_invalid')
     if failure:
         return dict(status='failed', reason=failure, receipt_sha256=receipt_hash)
@@ -149,7 +150,7 @@ def run(args):
         os.close(fd)
 
 
-def status(state, binary=None):
+def status(state, binary=None, *, verify_native_receipt=False):
     try:
         plan = decode((state / PLAN).read_bytes())
     except FileNotFoundError:
@@ -164,10 +165,14 @@ def status(state, binary=None):
         raise AssignmentError('verdict_does_not_match_plan')
     # Older plans do not pin the input. Keep their original incomplete state
     # visible rather than attributing an unverifiable receipt to them.
-    if (binary is not None and 'input_sha256' in plan
-            and (verdict is None or verdict.get('status') == 'uncertain')):
+    recheck_success = verify_native_receipt and matches(verdict, status='succeeded')
+    if (recheck_success or (binary is not None and 'input_sha256' in plan
+                            and (verdict is None or verdict.get('status') == 'uncertain'))):
         ids = {key: plan[key] for key in ('run_id', 'attempt_id')}
-        result = observe(str(binary.resolve()), state, ids, plan)
+        result = (observe(str(binary.resolve()), state, ids, plan) if binary is not None
+                  else dict(status='uncertain', reason='runtime_unavailable'))
+        if recheck_success and result['status'] == 'succeeded' and not matches(verdict, **result):
+            result = dict(status='uncertain', reason='cached_verdict_does_not_match_native_receipt')
         verdict = dict(version=VERSION, **ids, **result,
                        requested_model=plan['desired']['model'], requested_effort=plan['desired']['effort'],
                        observed_model=None, observed_effort=None)
@@ -182,6 +187,7 @@ def main(argv=None):
     parser.add_argument('--state', required=True, type=Path)
     if reading:
         parser.add_argument('--runtime', type=Path, help='recheck incomplete evidence without submitting work')
+        parser.add_argument('--verify-native-receipt', action='store_true', help='recheck cached success against native evidence')
     else:
         parser.epilog = 'Read-only lookup: python -m role_orchestrator.assignment status --state PATH'
         for flag in ('lab', 'runtime'):
@@ -192,7 +198,9 @@ def main(argv=None):
         parser.add_argument('--profile', default='lab-v1', choices=('lab-v1', 'development-patch-v1', 'review-v1'))
     args = parser.parse_args(argv[1:] if reading else argv)
     try:
-        return status(args.state, args.runtime) if reading else run(args)
+        if reading:
+            return status(args.state, args.runtime, verify_native_receipt=args.verify_native_receipt)
+        return run(args)
     except AssignmentError as exc:
         print(encode({'error': str(exc)}), file=sys.stderr)
     except (Exception, KeyboardInterrupt):

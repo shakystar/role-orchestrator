@@ -232,6 +232,8 @@ def call_assignment(request, member, member_dir, assignment_input, reconcile):
     if reconcile:
         command.extend(['status', '--state', str(member_dir),
                         '--runtime', request['runtime']])
+        if 'parent' in request:
+            command.append('--verify-native-receipt')
         stdin = b''
     else:
         command.extend(['--lab', request['lab'], '--revision', request['revision'],
