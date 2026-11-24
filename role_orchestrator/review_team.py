@@ -69,6 +69,8 @@ def decode(data):
 
 
 def encode(value):
+    # Broker records and dispatch stdin append LF; intent hashes do not.
+    # Assignment plan and artifact hashes instead use role_contracts.canonical.
     return json.dumps(value, ensure_ascii=True, allow_nan=False,
                       sort_keys=True, separators=(',', ':')).encode('ascii')
 
@@ -122,7 +124,20 @@ def validate_request(value, backend):
     overlapping = [member for member in route if member in authors]
     if overlapping:
         raise Invalid('self-review is not allowed: ' + ', '.join(overlapping))
+    if backend == 'fixture':
+        preflight_fixtures(value, route)
     return route
+
+
+def preflight_fixtures(review, route):
+    fixtures = review.get('fixtures', {})
+    if not isinstance(fixtures, dict):
+        raise Invalid('fixtures must be an object keyed by member ID')
+    for member in route:
+        if member not in fixtures:
+            raise Invalid(f'missing fixture for {member}; use a new state directory with that fixture')
+        if validate_output(fixtures[member], member)['decision'] != 'accept':
+            break
 
 
 def review_route(kind, stateful):
@@ -168,12 +183,13 @@ def intent_name(member):
     return member + '.intent.json'
 
 
-def prepare_state(root, directory_fd, request):
+def prepare_state(root, directory_fd, request, *, readonly=False):
     names = {path.name for path in root.iterdir()}
     if REQUEST_FILE not in names:
         if names:
             raise Hold('nonempty team state has no request intent')
-        write_record(root / REQUEST_FILE, request, directory_fd)
+        if not readonly:
+            write_record(root / REQUEST_FILE, request, directory_fd)
         return set()
 
     previous = read_record(root / REQUEST_FILE)
@@ -273,7 +289,7 @@ def call_assignment(request, member, member_dir, assignment_input, reconcile):
                 if plan.get(field) != expected:
                     raise Invalid(f'assignment plan {field} does not match the dispatch')
             contract = plan.get('contract')
-            if not isinstance(contract, dict) or contract.get('profile') != 'review-v1':
+            if not isinstance(contract, dict) or contract.get('profile') != PROFILE:
                 raise Invalid('assignment plan has the wrong contract profile')
             if 'parent' in request and any(plan.get(key) != value for key, value in
                                            request['parent']['assignment_contracts'][member].items()):
@@ -324,7 +340,74 @@ def run_member(root, directory_fd, names, request, member, prior):
     return call_assignment(request, member, member_dir, assignment_input, False)
 
 
+def validate_saved_attempt(value):
+    allowed = {'run_id', 'attempt_id', 'receipt_sha256'}
+    if not isinstance(value, dict) or value.keys() - allowed:
+        raise Invalid('invalid terminal attempt fields')
+    for key, identifier in value.items():
+        if key == 'receipt_sha256':
+            valid = matches(SHA256, identifier)
+        else:
+            valid = isinstance(identifier, str) and bool(identifier.strip())
+        if not valid:
+            raise Invalid(f'invalid terminal attempt {key}')
+    return value
+
+
+def terminal_attempts(root, route):
+    saved = read_record(root / 'outcome.json')
+    try:
+        member = saved.get('member_id')
+        artifacts = saved.get('artifacts')
+        fields = {'status', 'member_id', 'reason', 'artifacts'}
+        if member not in route or not isinstance(artifacts, list):
+            raise Invalid('invalid terminal member or artifacts')
+        diagnostic = 'attempt' in saved
+        expected = route[:route.index(member) + (not diagnostic)]
+        if len(artifacts) != len(expected):
+            raise Invalid('terminal artifacts do not cover the expected route prefix')
+        attempts = {}
+        for actual, record in zip(expected, artifacts):
+            if (not isinstance(record, dict)
+                    or record.get('actual_member_id') != actual):
+                raise Invalid('terminal artifact member does not match the route')
+            artifact = record.get('artifact')
+            if not isinstance(artifact, dict) or set(artifact) != {'payload', 'sha256'}:
+                raise Invalid('invalid terminal artifact fields')
+            output = validate_output(artifact['payload'], actual)
+            if hashlib.sha256(canonical(output)).hexdigest() != artifact['sha256']:
+                raise Invalid('terminal artifact payload hash does not match')
+            if (diagnostic or actual != member) and output['decision'] != 'accept':
+                raise Invalid('terminal artifacts continue past a stopping decision')
+            attempt = validate_saved_attempt({
+                key: value for key, value in record.items() if key not in {'actual_member_id', 'artifact'}})
+            if 'receipt_sha256' not in attempt:
+                raise Invalid('terminal artifact is missing its receipt hash')
+            attempts[actual] = attempt
+        if diagnostic:
+            if (set(saved) - {'cause'} != fields | {'attempt'}
+                    or saved['status'] != 'hold'
+                    or saved.get('cause', 'member-unavailable') != 'member-unavailable'
+                    or not isinstance(saved['reason'], str)
+                    or not saved['reason'].strip()):
+                raise Invalid('invalid terminal diagnostic')
+            attempts[member] = validate_saved_attempt(saved['attempt'])
+        else:
+            if set(saved) != fields | {'decision', 'owner'}:
+                raise Invalid('invalid terminal outcome fields')
+            decision = output['decision']
+            status = {'accept': 'accepted', 'hold': 'hold'}.get(decision, 'feedback')
+            if (saved['status'] != status or (decision == 'accept' and member != FINAL)
+                    or any(saved[key] != value for key, value in output.items())):
+                raise Invalid('terminal outcome does not match its final artifact')
+        return attempts
+    except (ValueError, RecursionError) as exc:
+        raise Hold(f'invalid terminal outcome: {exc}') from exc
+
+
 def run_review(root, request, *, readonly=False):
+    if request['backend'] == 'fixture':
+        preflight_fixtures(request['input'], request['route'])
     if readonly and not root.exists():
         return {'status': 'pending', 'artifacts': []}, 0
     if not readonly:
@@ -332,32 +415,41 @@ def run_review(root, request, *, readonly=False):
     directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         fcntl.flock(directory_fd, fcntl.LOCK_SH if readonly else fcntl.LOCK_EX)
-        if readonly and not (root / REQUEST_FILE).exists() and not any(root.iterdir()):
-            return {'status': 'pending', 'artifacts': []}, 0
-        names = prepare_state(root, directory_fd, request)
+        names = prepare_state(root, directory_fd, request, readonly=readonly)
+        terminal = 'outcome.json' in names
+        try:
+            attempts = terminal_attempts(root, request['route']) if terminal else {}
+        except Hold as exc:
+            return {'status': 'hold', 'cause': 'terminal-outcome', 'reason': str(exc),
+                    'task': request['input']['task'], 'artifacts': []}, 3
+
         def finish(result, code):
-            if 'parent' in request and 'outcome.json' not in names and not readonly:
+            if 'parent' in request and not terminal and not readonly:
                 write_record(root / 'outcome.json', result, directory_fd)
             return result, code
 
         receipts = []
         for member in request['route']:
-            if readonly and intent_name(member) not in names:
-                if 'outcome.json' in names:
-                    return {'status': 'hold', 'reason': 'terminal dispatch history is incomplete',
+            if intent_name(member) not in names:
+                if terminal:
+                    return {'status': 'hold', 'cause': 'terminal-history',
+                            'member_id': member, 'reason': 'terminal dispatch history is incomplete',
                             'artifacts': receipts}, 3
-                return {'status': 'pending', 'artifacts': receipts}, 0
+                if readonly:
+                    return {'status': 'pending', 'artifacts': receipts}, 0
             try:
                 receipt = run_member(root, directory_fd, names, request, member, receipts)
             except (Hold, OSError) as exc:
-                attempt = getattr(exc, 'attempt', {})
-                if not attempt and 'outcome.json' in names:
-                    saved = read_record(root / 'outcome.json')
-                    attempt = next((a for a in saved['artifacts']
-                                    if a['actual_member_id'] == member), saved.get('attempt', {}))
-                return finish({'status': 'hold', 'member_id': member, 'reason': str(exc),
-                               'attempt': {k: attempt[k] for k in ('run_id', 'attempt_id', 'receipt_sha256')
-                                           if k in attempt}, 'artifacts': receipts}, 3)
+                attempt = getattr(exc, 'attempt', {}) or attempts.get(member, {})
+                return finish({'status': 'hold', 'cause': 'member-unavailable',
+                               'member_id': member, 'reason': str(exc),
+                               'attempt': attempt, 'artifacts': receipts}, 3)
+            recorded = attempts.get(member, {})
+            if 'receipt_sha256' in recorded and any(
+                    receipt.get(key) != value for key, value in recorded.items()):
+                return {'status': 'hold', 'cause': 'terminal-history',
+                        'member_id': member, 'reason': 'receipt identifiers differ from terminal outcome',
+                        'artifacts': receipts}, 3
             receipts.append(receipt)
             output = receipt['artifact']['payload']
             if output['decision'] != 'accept' or member == FINAL:
@@ -385,6 +477,7 @@ def main(argv=None):
     parser.add_argument('--runtime', required=True)
     parser.add_argument('--state', required=True)
     parser.add_argument('--backend', choices=('fixture', 'codex'), required=True)
+    parser.add_argument('--readonly', action='store_true', help='query without writing or dispatching')
     try:
         args = parser.parse_args(argv)
         if not matches(FULL_REVISION, args.revision):
@@ -398,7 +491,8 @@ def main(argv=None):
                    'lab': str(absolute_path(args.lab, '--lab')),
                    'runtime': str(absolute_path(args.runtime, '--runtime')),
                    'revision': args.revision, 'backend': args.backend}
-        result, code = run_review(absolute_path(args.state, '--state'), request)
+        result, code = run_review(absolute_path(args.state, '--state'), request,
+                                  readonly=args.readonly)
     except Invalid as exc:
         result, code = {'status': 'rejected', 'reason': str(exc)}, 2
     except (Hold, OSError) as exc:
