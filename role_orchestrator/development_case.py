@@ -191,6 +191,7 @@ def main():
     parser.add_argument('--state', type=Path, required=True)
     parser.add_argument('--runtime', type=Path, required=True)
     parser.add_argument('--lab', type=Path, required=True)
+    parser.add_argument('--subject-repo', type=Path)
     parser.add_argument('--revision', required=True)
     parser.add_argument('--backend', choices=('fixture', 'codex'), required=True)
     args = parser.parse_args()

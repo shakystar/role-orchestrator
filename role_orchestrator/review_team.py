@@ -313,6 +313,8 @@ def run_member(root, directory_fd, names, request, member, prior):
     review = request['input']
     assignment_input = {'goal': review['task'], 'evidence': review['evidence'],
                         'upstream': [receipt['artifact'] for receipt in prior]}
+    if request.get('parent', {}).get('policy_binding') and member == 'acl-012':
+        assignment_input['upstream'] = []
     if request['backend'] == 'fixture':
         fixtures = review.get('fixtures', {})
         if member not in fixtures:
@@ -451,6 +453,13 @@ def run_review(root, request, *, readonly=False):
                         'member_id': member, 'reason': 'receipt identifiers differ from terminal outcome',
                         'artifacts': receipts}, 3
             receipts.append(receipt)
+            if request.get('parent', {}).get('policy_binding') and member == 'acl-012':
+                from .policy_review import findings
+                try:
+                    findings(request['input']['evidence'], receipt)
+                except (ValueError, RecursionError) as exc:
+                    return finish({'status': 'hold', 'member_id': member, 'reason': str(exc),
+                                   'artifacts': receipts}, 3)
             output = receipt['artifact']['payload']
             if output['decision'] != 'accept' or member == FINAL:
                 status = {'accept': 'accepted', 'hold': 'hold'}.get(output['decision'], 'feedback')

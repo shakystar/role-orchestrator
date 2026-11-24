@@ -4,7 +4,7 @@ import os
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-from . import assignment, review_team as broker
+from . import assignment, policy_review, review_team as broker
 from .role_contracts import digest
 
 Hold = broker.Hold
@@ -23,7 +23,7 @@ def locked(path, readonly):
 
 def specification(value, backend):
     required = {'team', 'revision', 'evidence'}
-    allowed = required | {'kind', 'stateful', 'authors'}
+    allowed = required | {'kind', 'stateful', 'authors', 'subject'}
     if not isinstance(value, dict) or not required <= value.keys() <= allowed:
         raise ValueError('invalid case.review fields')
     if value['team'] != broker.TEAM or type(value['revision']) is not int or value['revision'] < 1:
@@ -53,8 +53,13 @@ def specification(value, backend):
             or len(authors) != len(set(authors))):
         raise ValueError('case.review.authors must contain distinct member IDs')
     missing = 'kind' if kind is None else 'stateful' if kind == 'patch' and stateful is None else None
+    subject = None
+    if kind == 'patch' and not missing:
+        subject = policy_review.subject(value.get('subject'))
+    elif 'subject' in value and kind != 'patch':
+        raise ValueError('case.review.subject is reserved for patch review')
     return SimpleNamespace(revision=value['revision'], kind=kind, stateful=bool(stateful),
-                           authors=authors, evidence=evidence, fixtures=fixtures, missing=missing,
+                           authors=authors, evidence=evidence, fixtures=fixtures, missing=missing, subject=subject,
                            spec_sha256=digest(broker.encode(value)))
 
 
@@ -97,6 +102,9 @@ def reconcile(args, case_id, spec):
     intent = broker.read_record(path)
     if intent['parent']['spec_sha256'] != spec.spec_sha256:
         raise ValueError('review input changed; use a new review revision')
+    bound = intent['parent'].get('policy_binding')
+    if bound and (spec.subject is None or any(bound.get(k) != v for k, v in spec.subject.items())):
+        raise Hold('saved subject differs from the declared review subject')
     return finish(args, root, intent)
 
 
@@ -124,17 +132,29 @@ def start(args, case_id, spec, criterion, author_input, author, patch_hash):
     evidence = {'review': spec.evidence, 'criterion': criterion, 'source': author_input['source'],
                 'base_sha': author_input['base_sha'], 'patch_sha256': patch_hash, 'author_receipt': reference,
                 'candidate_sha': candidate, 'authored_artifact': artifact['payload'], 'parent_task_id': case_id, 'revision': spec.revision}
+    binding = None
+    if spec.kind == 'patch':
+        binding, evidence = policy_review.bind(args, spec, author_input, author)
+        parent.update(policy_binding=binding, author_receipt=reference)
     request_input = {'team': broker.TEAM, 'task': f'Review {spec.kind} for {case_id} revision {spec.revision}.',
                      'kind': spec.kind, 'stateful': spec.stateful, 'authors': [member], 'evidence': evidence}
     if spec.fixtures is not None:
         request_input['fixtures'] = spec.fixtures
     route = broker.validate_request(request_input, args.backend)
+    if binding and (route.count(policy_review.REVIEWER) != 1 or member in route):
+        raise ValueError('patch review requires the independent acl-012 route')
     contracts = {}
     for reviewer in route:
         plan = assignment.make_plan(SimpleNamespace(lab=args.lab, revision=args.revision,
             member=reviewer, task=reviewer, backend=args.backend, profile=broker.PROFILE))
         if plan.get('contract', {}).get('profile') != broker.PROFILE:
             raise ValueError('roster does not supply required review role: ' + reviewer)
+        if binding and reviewer == policy_review.REVIEWER:
+            expected = policy_review.role_contract(reviewer, profile=broker.PROFILE)
+            if (plan.get('contract') != expected
+                    or plan.get('handoff_id') != expected['role']
+                    or not plan.get('expected_role_version')):
+                raise ValueError('acl-012 does not have the pinned code-review contract')
         contracts[reviewer] = {k: plan[k] for k in (
             'contract', 'model', 'reasoning_effort', 'expected_role_version', 'handoff_id') if k in plan}
     parent.update(review_kind=spec.kind, stateful=spec.stateful, authors=[member], route=route,
@@ -151,11 +171,33 @@ def finish(args, root, intent):
     parent = intent['parent']
     path = root / 'result.json'
     recorded = path.exists()
-    if recorded and broker.read_record(path).get('delegation') != parent:
-        raise Hold('saved parent result does not match its review intent')
     if (intent['lab'] != str(args.lab.resolve()) or intent['runtime'] != str(args.runtime.resolve())
             or intent['revision'] != args.revision or intent['backend'] != args.backend):
         raise ValueError('saved review execution context differs')
+    patch = parent.get('review_kind') == 'patch'
+
+    def policy_hold(exc):
+        return {'case_id': parent['case_id'], 'revision': parent['revision'],
+                'stage': 'independent_review', 'state': 'hold', 'delegation': parent,
+                'reason': str(exc), 'parent_recorded': recorded}
+
+    try:
+        saved = broker.read_record(path) if recorded else None
+        if recorded and saved.get('delegation') != parent:
+            raise Hold('saved parent result does not match its review intent')
+        if patch:
+            if (intent['input']['evidence'] != parent['evidence']
+                    or digest(broker.encode(intent['input'])) != parent['input_sha256']
+                    or parent['roster_sha'] != args.revision
+                    or intent['input']['authors'] != parent['authors']
+                    or intent['route'] != parent['route']
+                    or policy_review.REVIEWER not in parent['assignment_contracts']):
+                raise Hold('parent decision input differs from the pinned patch review')
+            policy_review.replay(args, parent)
+    except (Hold, assignment.AssignmentError, KeyError, OSError, ValueError, RecursionError) as exc:
+        if patch:
+            return policy_hold(exc)
+        raise
     try:
         team, _ = broker.run_review(root / 'team', intent, readonly=True)
         if team['status'] == 'pending' and args.action == 'run' and not recorded:
@@ -167,6 +209,15 @@ def finish(args, root, intent):
     state = team.get('decision', team['status']) if team['status'] != 'hold' else 'hold'
     result = {'case_id': parent['case_id'], 'revision': parent['revision'], 'stage': 'independent_review',
               'state': state, 'team': team, 'delegation': parent}
+    if patch:
+        try:
+            linked = policy_review.link(root, parent, team, readonly=recorded or args.action == 'status')
+            if linked is not None:
+                result['policy_review'] = linked
+            if recorded and saved != result:
+                raise Hold('saved parent result differs from the verified replay')
+        except (Hold, KeyError, OSError, ValueError, RecursionError) as exc:
+            return policy_hold(exc)
     if args.action == 'run' and not recorded and state != 'pending':
         save(path, result)
         recorded = True
