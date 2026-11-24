@@ -420,13 +420,22 @@ def terminal_attempts(saved, request):
                 raise Invalid('terminal artifact is missing its receipt hash')
             attempts[actual] = attempt
         if diagnostic:
-            if (set(saved) - {'cause'} != fields | {'attempt'}
-                    or saved['status'] != 'hold'
+            diagnostic_fields = fields | {'attempt'}
+            if (saved.get('status') != 'hold'
                     or saved.get('cause', 'member-unavailable') != 'member-unavailable'
                     or not isinstance(saved['reason'], str)
                     or not saved['reason'].strip()):
                 raise Invalid('invalid terminal diagnostic')
-            validate_saved_attempt(saved['attempt'])  # Legacy hints are not evidence.
+            if 'task_id' in saved:
+                if (set(saved) != diagnostic_fields | {'cause', 'task_id'}
+                        or saved['task_id'] != dispatch_ticket(request, member)['task_id']
+                        or saved['attempt'] != {}):
+                    raise Invalid('invalid terminal member-unavailable identity')
+            else:
+                if set(saved) - {'cause'} != diagnostic_fields:
+                    raise Invalid('invalid legacy terminal diagnostic')
+                # Accept old records without rewriting them or trusting their hints.
+                validate_saved_attempt(saved['attempt'])
         elif not policy:
             if set(saved) != fields | {'decision', 'owner'}:
                 raise Invalid('invalid terminal outcome fields')
@@ -486,7 +495,8 @@ def run_review(root, request, *, readonly=False):
                 receipt = run_member(root, directory_fd, names, request, member, receipts)
             except (Hold, OSError) as exc:
                 return finish({'status': 'hold', 'cause': 'member-unavailable',
-                               'member_id': member, 'reason': str(exc) or type(exc).__name__,
+                               **dispatch_ticket(request, member),
+                               'reason': str(exc) or type(exc).__name__,
                                'attempt': {}, 'artifacts': receipts}, 3)
             recorded = attempts.get(member, {})
             if 'receipt_sha256' in recorded and any(
