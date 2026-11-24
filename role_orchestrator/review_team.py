@@ -381,6 +381,8 @@ def validate_saved_attempt(value):
 def terminal_attempts(saved, request):
     route = request['route']
     try:
+        if not isinstance(saved, dict):
+            raise Invalid('terminal outcome must be an object')
         member = saved.get('member_id')
         artifacts = saved.get('artifacts')
         fields = {'status', 'member_id', 'reason', 'artifacts'}
@@ -421,11 +423,6 @@ def terminal_attempts(saved, request):
             attempts[actual] = attempt
         if diagnostic:
             diagnostic_fields = fields | {'attempt'}
-            if (saved.get('status') != 'hold'
-                    or saved.get('cause', 'member-unavailable') != 'member-unavailable'
-                    or not isinstance(saved['reason'], str)
-                    or not saved['reason'].strip()):
-                raise Invalid('invalid terminal diagnostic')
             if 'task_id' in saved:
                 if (set(saved) != diagnostic_fields | {'cause', 'task_id'}
                         or saved['task_id'] != dispatch_ticket(request, member)['task_id']
@@ -436,6 +433,11 @@ def terminal_attempts(saved, request):
                     raise Invalid('invalid legacy terminal diagnostic')
                 # Accept old records without rewriting them or trusting their hints.
                 validate_saved_attempt(saved['attempt'])
+            if (saved['status'] != 'hold'
+                    or saved.get('cause', 'member-unavailable') != 'member-unavailable'
+                    or not isinstance(saved['reason'], str)
+                    or not saved['reason'].strip()):
+                raise Invalid('invalid terminal diagnostic')
         elif not policy:
             if set(saved) != fields | {'decision', 'owner'}:
                 raise Invalid('invalid terminal outcome fields')
