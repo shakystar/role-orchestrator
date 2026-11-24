@@ -19,22 +19,40 @@ ROLES = dict(observe='research-observer', draft='research-synthesizer',
 STEPS = dict(intake=1, observe=1, draft=2, review=3, synthesize=4, decision=2)
 META = {'time', 'method', 'scope', 'denominator', 'deduplicated'}
 PROTOCOL = {
-    'intake': 'Return action (start_review or hold), reason and case_sha256. No task creation.',
-    'observe': 'Return observations, hypotheses, signals, unknowns, falsifiers (text arrays), '
-               'and needs (array of {ref,field} for unknown evidence facts).',
-    'draft': 'Return claims keyed by ID: statement, support and counter (evidence-ID arrays), '
-             'requires ({ref,field} array), alternatives and falsifiers (text arrays), limits '
-             'and reproduction (text). Declare dependencies for each inference, compare alternatives, '
-             'and distinguish observations from inference and unverified reproduction.',
-    'review': 'Return draft_sha256, conflict (boolean) and opinions keyed by opinion ID: '
-              'claim, verdict (support, oppose or undetermined), reason and missing ({ref,field} array). '
-              'Cover every claim, test counterexplanations and declare any involvement.',
-    'synthesize': 'Return draft_sha256, dispositions keyed by opinion ID (acknowledge or retain_dissent), '
-                  'and next_question. Preserve negative or uncertain opinions as dissent; no rewritten claims.',
-    'decision': 'Return packet_sha256, action (retain, hold or select_followup), reason and claims '
-                '(IDs of eligible claims only for select_followup, empty otherwise). Do not create work '
-                'or change priorities, approved goals, constraints or access.',
+    'intake': 'decision: {"action":"start_review","reason":"...","case_sha256":"..."}; '
+              'action is start_review or hold. Copy context.prior.case_sha256. Do not create tasks.',
+    'observe': 'artifact: {"observations":[],"hypotheses":[],"signals":[],"unknowns":[],'
+               '"falsifiers":[],"needs":[{"ref":"S1","field":"denominator"}]}; first five arrays '
+               'contain text strings; needs lists unknown evidence facts.',
+    'draft': 'decision: {"claims":{"c1":{"statement":"...","support":["S1"],"counter":[],'
+             '"requires":[],"alternatives":["..."],"falsifiers":["..."],"limits":"...",'
+             '"reproduction":"...","claim_scope":"limited_observation"}}}; support and counter '
+             'are evidence ID arrays; requires lists {ref,field} records. Alternatives and falsifiers '
+             'are nonempty text arrays. Use limited_observation only for direct observations bounded '
+             'to cited evidence, not extrapolations. Use broader_inference for generalizations; '
+             'omitting claim_scope has the same meaning. For broader inference, unresolved observation '
+             'needs on any support, counter or requires evidence ref gate the claim even with empty '
+             'requires. Both scopes remain subject to explicit missing facts and reviewer dissent.',
+    'review': 'artifact: {"draft_sha256":"...","conflict":false,"opinions":{"o1":{"claim":"c1",'
+              '"verdict":"support","reason":"...","missing":[]}}}; copy the hash from '
+              'context.prior.draft_sha256. conflict is a boolean; verdict is support, oppose or '
+              'undetermined. missing lists {ref,field} records. Review every claim and challenge its scope.',
+    'synthesize': 'decision: {"draft_sha256":"...","dispositions":{"o1":"acknowledge"},'
+                  '"next_question":"..."}; copy the hash from context.prior.draft_sha256. Use exactly '
+                  'the prior opinion IDs, with acknowledge or retain_dissent; retain dissent for '
+                  'every oppose or undetermined. Do not rewrite claims.',
+    'decision': 'decision: {"packet_sha256":"...","action":"select_followup","reason":"...",'
+                '"claims":["c1"]}; copy the hash from context.prior.packet_sha256. claims is a '
+                'nonempty array of distinct eligible claim IDs for select_followup; use [] for retain '
+                'or hold. Do not create work or change priorities, approved goals, constraints or access.',
 }
+WIRE = ('Use the named outer key with a JSON object as its value. Stage protocol governs wire '
+        'format; role duty governs content. Quoted values are strings; "..." denotes nonempty text '
+        'or the supplied hash. In {ref,field} records, ref is an existing evidence ID and field is '
+        'a fact name. Copy actual reference IDs from context, not example IDs. Only draft defines '
+        'claim IDs and only review defines opinion IDs; use nonempty maps. IDs and fact names are '
+        '1–64 ASCII alphanumerics, underscores or hyphens, starting alphanumeric. Copy supplied '
+        'hashes, never calculate them. Fields are required except draft claim_scope. ')
 
 
 def token(value):
@@ -66,16 +84,34 @@ def case_input(case):
              and mapping(item['facts']) and META <= item['facts'].keys(), 'invalid_evidence')
 
 
-def dependencies(items, evidence):
+def project(value, required, error, optional=''):
+    keys = required.split()
+    need(isinstance(value, dict) and all(k in value for k in keys), error)
+    return {k: value[k] for k in keys + optional.split() if k in value}
+
+
+def dependency_records(items, evidence):
     need(isinstance(items, list), 'invalid_dependencies')
-    missing = set()
+    result = []
     for item in items:
-        need(fields(item, 'ref field') and token(item['ref']) and token(item['field'])
+        item = project(item, 'ref field', 'invalid_dependency')
+        need(token(item['ref']) and token(item['field'])
              and item['ref'] in evidence, 'invalid_dependency')
-        facts = evidence[item['ref']]['facts']
-        if facts.get(item['field']) is None:
-            missing.add((item['ref'], item['field']))
-    return missing
+        result.append(item)
+    return result
+
+
+def dependencies(items, evidence):
+    return {(item['ref'], item['field']) for item in dependency_records(items, evidence)
+            if evidence[item['ref']]['facts'].get(item['field']) is None}
+
+
+def observation_dependencies(claim, unresolved):
+    if claim.get('claim_scope') == 'limited_observation':
+        return set()
+    refs = set(claim['support']) | set(claim.get('counter', []))
+    refs.update(item['ref'] for item in claim['requires'])
+    return {pair for pair in unresolved if pair[0] in refs}
 
 
 def requests(missing, evidence):
@@ -93,51 +129,68 @@ def apply(phase, value, state, receipts):
     case, data = state['case'], state['data']
     evidence = case['evidence']
     if phase == 'intake':
-        need(fields(value, 'action reason case_sha256') and text(value['reason'])
+        value = project(value, 'action reason case_sha256', 'invalid_intake')
+        need(text(value['reason'])
              and value['case_sha256'] == digest(canonical(case))
              and value['action'] in ('start_review', 'hold'), 'invalid_intake')
         return {'intake': value}, value if value['action'] == 'hold' else None
     if phase == 'observe':
         names = 'observations hypotheses signals unknowns falsifiers'
-        need(fields(value, names + ' needs') and all(array(value[k]) for k in names.split()),
-             'invalid_observation')
+        value = project(value, names + ' needs', 'invalid_observation')
+        need(all(array(value[k]) for k in names.split()), 'invalid_observation')
+        value['needs'] = dependency_records(value['needs'], evidence)
         missing = dependencies(value['needs'], evidence)
         return {'observation': value, 'upstream': requests(missing, evidence)}, None
     if phase == 'draft':
-        need(fields(value, 'claims') and mapping(value['claims']), 'invalid_draft')
-        for claim in value['claims'].values():
-            need(fields(claim, 'statement support counter requires alternatives falsifiers limits reproduction')
-                 and all(text(claim[k]) for k in ('statement', 'limits', 'reproduction'))
+        value = project(value, 'claims', 'invalid_draft')
+        need(mapping(value['claims']), 'invalid_draft')
+        claims = {}
+        for cid, raw in value['claims'].items():
+            claim = project(raw, 'statement support counter requires alternatives falsifiers limits reproduction',
+                            'invalid_claim', optional='claim_scope')
+            need(all(text(claim[k]) for k in ('statement', 'limits', 'reproduction'))
                  and all(array(claim[k]) and claim[k] for k in ('alternatives', 'falsifiers'))
                  and all(array(claim[k], token) and set(claim[k]) <= evidence.keys()
-                         for k in ('support', 'counter')), 'invalid_claim')
-            dependencies(claim['requires'], evidence)
+                         for k in ('support', 'counter'))
+                 and claim.get('claim_scope', 'broader_inference') in
+                 ('limited_observation', 'broader_inference'), 'invalid_claim')
+            claim['requires'] = dependency_records(claim['requires'], evidence)
+            claims[cid] = claim
         draft = dict(case_sha256=digest(canonical(case)), evidence_refs=sorted(evidence),
-                     authors=authors(case, receipts), claims=value['claims'])
+                     authors=authors(case, receipts), claims=claims)
         return {'draft': draft, 'draft_sha256': digest(canonical(draft))}, None
     if phase == 'review':
-        need(fields(value, 'draft_sha256 conflict opinions') and value['conflict'] is False
+        value = project(value, 'draft_sha256 conflict opinions', 'invalid_or_conflicted_review')
+        need(value['conflict'] is False
              and value['draft_sha256'] == data['draft_sha256'] and mapping(value['opinions']),
              'invalid_or_conflicted_review')
         claims = data['draft']['claims']
         covered = set()
-        for opinion in value['opinions'].values():
-            need(fields(opinion, 'claim verdict reason missing') and token(opinion['claim'])
+        opinions = {}
+        for oid, raw in value['opinions'].items():
+            opinion = project(raw, 'claim verdict reason missing', 'invalid_opinion')
+            need(token(opinion['claim'])
                  and opinion['claim'] in claims and text(opinion['reason'])
                  and opinion['verdict'] in ('support', 'oppose', 'undetermined'), 'invalid_opinion')
-            dependencies(opinion['missing'], evidence)
+            opinion['missing'] = dependency_records(opinion['missing'], evidence)
+            opinions[oid] = opinion
             covered.add(opinion['claim'])
         need(covered == claims.keys(), 'incomplete_review')
+        value['opinions'] = opinions
         return {'review': value}, None
     if phase == 'synthesize':
         opinions = data['review']['opinions']
-        need(fields(value, 'draft_sha256 dispositions next_question') and text(value['next_question'])
+        value = project(value, 'draft_sha256 dispositions next_question', 'invalid_synthesis')
+        need(text(value['next_question'])
              and value['draft_sha256'] == data['draft_sha256']
              and isinstance(value['dispositions'], dict) and value['dispositions'].keys() == opinions.keys(),
              'invalid_synthesis')
+        observed = data.get('observation', {'needs': []})
+        unresolved = dependencies(observed['needs'], evidence)
         gates = {}
         for cid, claim in data['draft']['claims'].items():
             missing = dependencies(claim['requires'], evidence)
+            missing.update(observation_dependencies(claim, unresolved))
             holds = [] if claim['support'] else ['no_support']
             ids = []
             for oid, opinion in sorted(opinions.items()):
@@ -157,13 +210,19 @@ def apply(phase, value, state, receipts):
                               opinions=ids, upstream=requests(missing, evidence))
         packet = dict(case=case, **data, synthesis=value, gates=gates)
         return {'packet': dict(packet, receipts=receipts), 'packet_sha256': digest(canonical(packet))}, None
-    eligible = {cid for cid, gate in data['packet']['gates'].items() if gate['status'] == 'eligible'}
-    need(fields(value, 'packet_sha256 action reason claims') and text(value['reason'])
+    packet = data['packet']
+    eligible = {cid for cid, gate in packet['gates'].items() if gate['status'] == 'eligible'}
+    value = project(value, 'packet_sha256 action reason claims', 'invalid_product_decision')
+    need(text(value['reason'])
          and value['packet_sha256'] == data['packet_sha256'] and array(value['claims'], token)
          and len(set(value['claims'])) == len(value['claims'])
          and ((value['action'] == 'select_followup' and value['claims']
                and set(value['claims']) <= eligible)
               or (value['action'] in ('retain', 'hold') and not value['claims'])), 'invalid_product_decision')
+    if value['action'] == 'select_followup' and 'observation' in packet:
+        unresolved = dependencies(packet['observation']['needs'], evidence)
+        need(not any(observation_dependencies(packet['draft']['claims'][cid], unresolved)
+                     for cid in value['claims']), 'packet_requires_resynthesis')
     return {'decision': value}, value
 
 
@@ -195,10 +254,12 @@ def advance(args, fd, state, route, approved, teams):
                 save(fd, state)
                 break
             goal, goal_text = approved[team]
+            case_sha256 = digest(canonical(state['case']))
+            prior = dict(state['data'], case_sha256=case_sha256) if phase == 'intake' else state['data']
             context = dict(principal=dict(team=team, goal=goal), approved_goal=goal_text,
                            research_goal=approved[TEAM][1], case=state['case'], phase=phase,
-                           case_sha256=digest(canonical(state['case'])), prior=state['data'],
-                           receipts=state['receipts'], protocol=PROTOCOL[phase])
+                           case_sha256=case_sha256, prior=prior, receipts=state['receipts'],
+                           protocol=WIRE + PROTOCOL[phase])
             work = {'context': context}
             if state['fixtures'] is not None:
                 work['fixture'] = state['fixtures'][phase]
