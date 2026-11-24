@@ -1,6 +1,6 @@
 # v0.2.0 · 개발 과제의 독립 리뷰팀 배정
 
-**상태** 개발 준비. 계약 소유자는 role-orchestrator다. 기존 배정기의 호출법과 후보 검증 기록은 [독립 리뷰팀 배정](independent-review.md)에 있다.
+**상태** 개발 준비. 계약 소유자는 role-orchestrator다. [통합 마일스톤과 검증 조합](https://github.com/shakystar/agent-eval/blob/32ba9808f68ed979ec1c9cdabd9b6a34620ce8f9/docs/milestones/v0.2.0/README.md). 기존 배정기의 호출법과 후보 검증 기록은 [독립 리뷰팀 배정](independent-review.md)에 있다.
 
 ## 사용자 동작과 범위
 
