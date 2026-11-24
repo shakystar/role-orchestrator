@@ -54,6 +54,9 @@ def make_plan(args, version=2):
         raise AssignmentError('full_commit_sha_required')
     if not ID.fullmatch(args.member) or not ID.fullmatch(args.task):
         raise AssignmentError('invalid_member_or_task_id')
+    if args.profile == 'planning-team-v1':
+        from .planning_catalog import bound_plan
+        return bound_plan(args, revision, version)
     roster = git(args.lab, 'show', revision + ':docs/team/roster.md')
     _, name, duty, handoff = select_row(roster, args.member, 'invalid_or_ambiguous_roster_row')
     handoff = literal(handoff)
