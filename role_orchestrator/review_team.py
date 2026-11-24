@@ -183,6 +183,15 @@ def intent_name(member):
     return member + '.intent.json'
 
 
+def dispatch_names(member):
+    return member + '.ready.json', member + '.started.json'
+
+
+def dispatch_ticket(request, member):
+    key = hashlib.sha256(encode(['review-dispatch-v1', request, member])).hexdigest()
+    return {'task_id': key, 'member_id': member}
+
+
 def prepare_state(root, directory_fd, request, *, readonly=False):
     names = {path.name for path in root.iterdir()}
     if REQUEST_FILE not in names:
@@ -190,7 +199,12 @@ def prepare_state(root, directory_fd, request, *, readonly=False):
             raise Hold('nonempty team state has no request intent')
         if not readonly:
             write_record(root / REQUEST_FILE, request, directory_fd)
-        return set()
+            names.add(REQUEST_FILE)
+            for member in request['route']:
+                ready, _ = dispatch_names(member)
+                write_record(root / ready, dispatch_ticket(request, member), directory_fd)
+                names.add(ready)
+        return names
 
     previous = read_record(root / REQUEST_FILE)
     if previous.keys() != request.keys():
@@ -204,7 +218,13 @@ def prepare_state(root, directory_fd, request, *, readonly=False):
     gap = False
     for member in request['route']:
         intent = intent_name(member)
-        allowed.update((member, intent))
+        ready, started = dispatch_names(member)
+        allowed.update((member, intent, ready, started))
+        if ready in names and names.intersection((intent, member, started)):
+            raise Hold(f'{member}: unused dispatch ticket conflicts with history')
+        for ticket in names.intersection((ready, started)):
+            if read_record(root / ticket) != dispatch_ticket(request, member):
+                raise Hold(f'{member}: dispatch ticket does not match the request')
         if intent not in names:
             if member in names:
                 raise Hold(f'{member}: member state has no dispatch intent')
@@ -267,7 +287,6 @@ def call_assignment(request, member, member_dir, assignment_input, reconcile):
         return call_assignment(request, member, member_dir, assignment_input, True)
     if completed.returncode != 0:
         raise Hold(f'{operation} exited with code {completed.returncode}')
-    attempt = {}
     try:
         result = decode(completed.stdout)
         if reconcile:
@@ -304,9 +323,7 @@ def call_assignment(request, member, member_dir, assignment_input, reconcile):
             result = verdict
         return validate_receipt(result, member)
     except (ValueError, RecursionError) as exc:
-        error = Hold(f'{operation} did not yield a valid succeeded receipt: {exc}')
-        error.attempt = attempt
-        raise error from exc
+        raise Hold(f'{operation} did not yield a valid succeeded receipt: {exc}') from exc
 
 
 def run_member(root, directory_fd, names, request, member, prior):
@@ -337,6 +354,11 @@ def run_member(root, directory_fd, names, request, member, prior):
             raise Hold('dispatch intent exists but member state is missing or empty')
         return call_assignment(request, member, member_dir, assignment_input, True)
 
+    ready, started = dispatch_names(member)
+    # Consume authorization durably before creating member records or submitting.
+    # Missing tickets are never regenerated in an initialized directory.
+    os.rename(root / ready, root / started)
+    os.fsync(directory_fd)
     write_record(root / marker, intent, directory_fd)
     member_dir.mkdir(mode=0o700)
     return call_assignment(request, member, member_dir, assignment_input, False)
@@ -356,8 +378,8 @@ def validate_saved_attempt(value):
     return value
 
 
-def terminal_attempts(root, route):
-    saved = read_record(root / 'outcome.json')
+def terminal_attempts(saved, request):
+    route = request['route']
     try:
         member = saved.get('member_id')
         artifacts = saved.get('artifacts')
@@ -365,6 +387,17 @@ def terminal_attempts(root, route):
         if member not in route or not isinstance(artifacts, list):
             raise Invalid('invalid terminal member or artifacts')
         diagnostic = 'attempt' in saved
+        legacy_policy = set(saved) == fields and saved['status'] == 'hold'
+        policy = saved.get('cause') == 'policy-findings' or legacy_policy
+        if policy:
+            if (member != 'acl-012' or not request.get('parent', {}).get('policy_binding')
+                    or saved.get('status') != 'hold'
+                    or not isinstance(saved.get('reason'), str)
+                    or (not legacy_policy and (
+                        set(saved) != fields | {'cause', 'task_id'}
+                        or not saved['reason'].strip()
+                        or saved['task_id'] != dispatch_ticket(request, member)['task_id']))):
+                raise Invalid('invalid terminal policy diagnostic')
         expected = route[:route.index(member) + (not diagnostic)]
         if len(artifacts) != len(expected):
             raise Invalid('terminal artifacts do not cover the expected route prefix')
@@ -393,8 +426,8 @@ def terminal_attempts(root, route):
                     or not isinstance(saved['reason'], str)
                     or not saved['reason'].strip()):
                 raise Invalid('invalid terminal diagnostic')
-            attempts[member] = validate_saved_attempt(saved['attempt'])
-        else:
+            validate_saved_attempt(saved['attempt'])  # Legacy hints are not evidence.
+        elif not policy:
             if set(saved) != fields | {'decision', 'owner'}:
                 raise Invalid('invalid terminal outcome fields')
             decision = output['decision']
@@ -402,7 +435,7 @@ def terminal_attempts(root, route):
             if (saved['status'] != status or (decision == 'accept' and member != FINAL)
                     or any(saved[key] != value for key, value in output.items())):
                 raise Invalid('terminal outcome does not match its final artifact')
-        return attempts
+        return attempts, policy
     except (ValueError, RecursionError) as exc:
         raise Hold(f'invalid terminal outcome: {exc}') from exc
 
@@ -418,15 +451,19 @@ def run_review(root, request, *, readonly=False):
     try:
         fcntl.flock(directory_fd, fcntl.LOCK_SH if readonly else fcntl.LOCK_EX)
         names = prepare_state(root, directory_fd, request, readonly=readonly)
+        if REQUEST_FILE not in names:
+            return {'status': 'pending', 'artifacts': []}, 0
         terminal = 'outcome.json' in names
         try:
-            attempts = terminal_attempts(root, request['route']) if terminal else {}
+            attempts, policy = (terminal_attempts(read_record(root / 'outcome.json'), request)
+                                if terminal else ({}, False))
         except Hold as exc:
             return {'status': 'hold', 'cause': 'terminal-outcome', 'reason': str(exc),
                     'task': request['input']['task'], 'artifacts': []}, 3
 
         def finish(result, code):
             if 'parent' in request and not terminal and not readonly:
+                terminal_attempts(result, request)
                 write_record(root / 'outcome.json', result, directory_fd)
             return result, code
 
@@ -437,15 +474,20 @@ def run_review(root, request, *, readonly=False):
                     return {'status': 'hold', 'cause': 'terminal-history',
                             'member_id': member, 'reason': 'terminal dispatch history is incomplete',
                             'artifacts': receipts}, 3
+                ready, _ = dispatch_names(member)
+                if ready not in names:
+                    return {'status': 'hold', 'cause': 'dispatch-history',
+                            **dispatch_ticket(request, member),
+                            'reason': 'no unused dispatch ticket; prior submission is uncertain',
+                            'artifacts': receipts}, 3
                 if readonly:
                     return {'status': 'pending', 'artifacts': receipts}, 0
             try:
                 receipt = run_member(root, directory_fd, names, request, member, receipts)
             except (Hold, OSError) as exc:
-                attempt = getattr(exc, 'attempt', {}) or attempts.get(member, {})
                 return finish({'status': 'hold', 'cause': 'member-unavailable',
-                               'member_id': member, 'reason': str(exc),
-                               'attempt': attempt, 'artifacts': receipts}, 3)
+                               'member_id': member, 'reason': str(exc) or type(exc).__name__,
+                               'attempt': {}, 'artifacts': receipts}, 3)
             recorded = attempts.get(member, {})
             if 'receipt_sha256' in recorded and any(
                     receipt.get(key) != value for key, value in recorded.items()):
@@ -458,8 +500,15 @@ def run_review(root, request, *, readonly=False):
                 try:
                     findings(request['input']['evidence'], receipt)
                 except (ValueError, RecursionError) as exc:
-                    return finish({'status': 'hold', 'member_id': member, 'reason': str(exc),
+                    return finish({'status': 'hold', 'cause': 'policy-findings',
+                                   **dispatch_ticket(request, member),
+                                   'reason': str(exc) or type(exc).__name__,
                                    'artifacts': receipts}, 3)
+                if policy:
+                    return {'status': 'hold', 'cause': 'terminal-history',
+                            **dispatch_ticket(request, member),
+                            'reason': 'terminal policy diagnostic did not reproduce',
+                            'artifacts': receipts}, 3
             output = receipt['artifact']['payload']
             if output['decision'] != 'accept' or member == FINAL:
                 status = {'accept': 'accepted', 'hold': 'hold'}.get(output['decision'], 'feedback')
