@@ -43,20 +43,27 @@ class PlanningTeamTest(unittest.TestCase):
         attempt = {'run_id': 'run-' + task, 'attempt_id': 'first'}
         plan.update(attempt, input_sha256=digest(canonical(current['input'])))
         verdict = dict(attempt, status='succeeded', actual_member_id=current['member_id'],
+                       actual_role_version=plan['expected_role_version'],
                        receipt_sha256='b' * 64, artifact={'payload': payload})
         return {'returncode': 0, 'value': {'plan': plan, 'verdict': verdict}}
 
     def test_reconcile_after_native_before_team_checkpoint(self):
+        fixtures = {f'demo--{n}': {'marker': n} for n in (1, 2, 3)}
+
+        def reconcile(args, current, dispatch):
+            self.assertEqual(current['input']['fixture'], fixtures[current['task_id']])
+            return self.observation(args, current, dispatch)
+
         def interrupt(args, current, dispatch):
-            result = self.observation(args, current, dispatch)
+            result = reconcile(args, current, dispatch)
             if current['task_id'] == 'demo--2':
                 raise InterruptedError('simulated interruption')  # caught as an uncertain native call
             return result
 
         with patch.object(broker, 'native', side_effect=interrupt):
-            result = broker.run(self.args, {'request': 'Make a plan'})
+            result = broker.run(self.args, {'request': 'Make a plan', 'fixtures': fixtures})
             self.assertEqual(result['pending'], 'demo--2')
-        with patch.object(broker, 'native', side_effect=self.observation):
+        with patch.object(broker, 'native', side_effect=reconcile):
             result = broker.run(self.args, None)
             self.assertEqual(result['branch']['action'], 'accept')
             self.assertEqual(result['artifacts']['demo--2']['evidence_kind'], 'fixture')
@@ -81,9 +88,25 @@ class PlanningTeamTest(unittest.TestCase):
     def test_native_plan_and_actual_member_mismatch(self):
         current = dict(task_id='demo--1', member_id='lead', input={'context': {}}, lead=True)
         for target, field, bad in (('plan', 'expected_role_version', 'other'),
-                                   ('verdict', 'actual_member_id', 'expert')):
+                                   ('verdict', 'actual_member_id', 'expert'),
+                                   ('verdict', 'actual_role_version', 'v2'),
+                                   ('verdict', 'actual_role_version', None)):
             with self.subTest(field=field):
                 observation = self.observation(self.args, current, False)
-                observation['value'][target][field] = bad
+                if bad is None:
+                    del observation['value'][target][field]
+                else:
+                    observation['value'][target][field] = bad
                 with self.assertRaises(ValueError):
                     broker.link(self.args, current, observation)
+
+    def test_native_status_verifies_both_backends(self):
+        current = {'task_id': 'demo--1'}
+        for backend in ('fixture', 'codex'):
+            self.args.backend = backend
+            with self.subTest(backend=backend), patch.object(broker, 'invoke') as invoke:
+                broker.native(self.args, current, False)
+                command, data = invoke.call_args.args
+                self.assertEqual(command[3:], ['status', '--state', str(self.args.state / 'demo--1'),
+                                               '--runtime', self.args.runtime, '--verify-native-receipt'])
+                self.assertEqual(data, b'')

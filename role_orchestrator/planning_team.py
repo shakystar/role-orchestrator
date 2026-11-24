@@ -14,13 +14,18 @@ from .role_contracts import canonical, digest
 from .roster import AssignmentError
 
 LEAD_PROTOCOL = (
-    'Select only necessary available member IDs; ordered work entries are {member_id, input} '
-    'where input is a JSON object. Return decision {action, intent, ...}. '
-    'intent is {explicit, hypotheses, counterevidence}, each an array of strings; '
-    'explicit entries must quote user messages, hypotheses are not user approval. '
-    'assign adds work; clarify adds question; revise adds request for upstream information; '
-    'hold adds reason; accept adds proposal (object) and evidence (specialist task IDs). '
-    'Do not change the approved goal or treat member evidence as user authorization.'
+    'As lead, separate what the user said from your assumptions, choose the smallest necessary '
+    'specialist path, and synthesize linked specialist artifacts. Specialists supply evidence, not approval. '
+    'Return decision with exactly action, intent, and the fields listed for that action. '
+    'intent = {explicit: string[], hypotheses: string[], counterevidence: string[]}. '
+    'Quote user messages verbatim in explicit; record assumptions and evidence against them separately. '
+    'assign: work = ordered [{member_id: string, input: object}]; use distinct keys from available, '
+    'not role names. Require 0 < len(work) < remaining to reserve a lead turn. '
+    'clarify: question = nonempty string asking the user to resolve ambiguity. '
+    'revise: request = nonempty string specifying missing or conflicting upstream information. '
+    'hold: reason = nonempty string explaining why work cannot proceed. '
+    'accept: proposal = nonempty object; evidence = nonempty unique specialist task IDs from evidence. '
+    'Do not change the approved goal or treat a hypothesis or specialist artifact as user authorization.'
 )
 
 
@@ -94,8 +99,8 @@ def native(args, current, dispatch):
                          '--state', str(directory), '--backend', args.backend, '--task', current['task_id'],
                          '--member', current['member_id'], '--profile', PROFILE],
                canonical(current['input']) + b'\n')
-    flags = ['--verify-native-receipt'] if args.backend == 'codex' else []
-    return invoke(command + ['status', '--state', str(directory), '--runtime', args.runtime] + flags, b'')
+    return invoke(command + ['status', '--state', str(directory), '--runtime', args.runtime,
+                             '--verify-native-receipt'], b'')
 
 
 def link(args, current, observation):
@@ -110,7 +115,8 @@ def link(args, current, observation):
     plan, verdict = status.get('plan'), status.get('verdict')
     need(isinstance(plan, dict) and all(plan.get(k) == v for k, v in expected.items()), 'native_plan_mismatch')
     need(isinstance(verdict, dict) and verdict.get('status') == 'succeeded'
-         and verdict.get('actual_member_id') == current['member_id'], 'native_success_required')
+         and verdict.get('actual_member_id') == current['member_id']
+         and verdict.get('actual_role_version') == expected['expected_role_version'], 'native_success_required')
     for field in ('run_id', 'attempt_id'):
         need(text(plan.get(field)) and plan[field] == verdict.get(field), 'native_attempt_mismatch')
     artifact, sha = verdict.get('artifact'), verdict.get('receipt_sha256')
@@ -129,6 +135,12 @@ def advance(args, path, state, team):
                 state['branch'] = {'action': 'hold', 'reason': 'step_budget_exhausted', 'terminal': True}
                 save(path, state)
                 break
+            task_id = f"{args.team}--{state['count'] + 1}"
+            fixtures = state.get('fixtures')
+            if fixtures is not None:
+                need(args.backend == 'fixture', 'fixtures_require_fixture_backend')
+                need(task_id in fixtures,
+                     f'missing fixture for {task_id}; use a new state directory with that fixture')
             lead = not state['queue']
             item = {'member_id': team['lead'], 'input': {}} if lead else state['queue'].pop(0)
             state['count'] += 1
@@ -138,8 +150,11 @@ def advance(args, path, state, team):
                 context.update(protocol=LEAD_PROTOCOL, remaining=team['max_steps'] - state['count'],
                                available={m: b for m, b in team['members'].items()
                                           if m != team['lead'] and m not in state['used']})
-            state['pending'] = dict(member_id=item['member_id'], input={'context': context},
-                                    task_id=f"{args.team}--{state['count']}", lead=lead)
+            work_input = {'context': context}
+            if fixtures is not None:
+                work_input['fixture'] = fixtures[task_id]
+            state['pending'] = dict(member_id=item['member_id'], input=work_input,
+                                    task_id=task_id, lead=lead)
             save(path, state)  # The only path that can dispatch is after this durable intent.
         current = state['pending']
         try:
@@ -208,9 +223,18 @@ def run(args, incoming):
                 save(path, state)
         else:
             need(not (set(p.name for p in root.iterdir()) - {'.lock', 'team.tmp'}), 'unrecognized_state')
-            need(fields(incoming, 'request') and text(incoming['request']), 'request_required')
+            with_fixtures = isinstance(incoming, dict) and 'fixtures' in incoming
+            need(fields(incoming, 'request fixtures' if with_fixtures else 'request')
+                 and text(incoming['request']), 'request_required')
+            fixtures = incoming.get('fixtures')
+            if with_fixtures:
+                need(args.backend == 'fixture', 'fixtures_require_fixture_backend')
+                step_ids = {f'{args.team}--{n}' for n in range(1, team['max_steps'] + 1)}
+                need(isinstance(fixtures, dict) and fixtures.keys() <= step_ids
+                     and all(isinstance(v, dict) for v in fixtures.values()), 'invalid_step_fixtures')
             state = dict(pin=pin, principal=principal, goal=approval['text'], messages=[incoming['request']],
-                         count=0, pending=None, branch=None, queue=[], used=[], journal=[], links={})
+                         count=0, pending=None, branch=None, queue=[], used=[], journal=[], links={},
+                         fixtures=fixtures)
             save(path, state)
         return advance(args, path, state, team)
 

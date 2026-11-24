@@ -12,6 +12,7 @@ import tempfile
 from .contracts import IDENTIFIER as ID, attempt_id, strict_json
 from .attempts import AttemptReader, terminal_failure
 from .role_contracts import canonical, digest, output_payload, validate_inputs
+from .planning_catalog import PROFILE, bound_plan
 from .roster import AssignmentError, make_plan
 from .runtime import Runtime, load_identity
 
@@ -61,6 +62,15 @@ def matches(obj, **expected):
     )
 
 
+def contract_inputs(payload, plan):
+    value = decode(payload)
+    if plan['contract'].get('profile') == PROFILE and 'fixture' in value:
+        if plan['backend'] != 'fixture' or not isinstance(value['fixture'], dict):
+            raise ValueError('invalid_planning_fixture')
+        del value['fixture']  # Transport metadata; the native input and its hash remain intact.
+    return value
+
+
 def observe(binary, state, ids, plan, request=None):
     if request is None:
         if not plan.get('input_sha256'):
@@ -92,7 +102,7 @@ def observe(binary, state, ids, plan, request=None):
     contract = plan.get('contract')
     if contract is not None:
         try:
-            payload = output_payload(result.get('text'), contract, decode(receipt['task']['input']))
+            payload = output_payload(result.get('text'), contract, contract_inputs(receipt['task']['input'], plan))
         except (ValueError, TypeError, KeyError, RecursionError):
             return dict(status='failed', reason='invalid_role_output', receipt_sha256=receipt_hash)
         verdict['artifact'] = dict(kind=contract['kind'], payload=payload, sha256=digest(canonical(payload)),
@@ -118,16 +128,27 @@ def assess(binary, state, ids, plan, request):
 
 
 def run(args):
-    payload, plan = read_input(), make_plan(args, VERSION)
+    payload = read_input()
+    if args.profile == PROFILE:
+        context = decode(payload).get('context')
+        if not isinstance(context, dict):
+            raise AssignmentError('planning_context_required')
+        plan = bound_plan(args, args.revision, VERSION, context=context)
+    else:
+        plan = make_plan(args, VERSION)
     if plan['contract'] is not None:
         try:
-            validate_inputs(decode(payload), plan['contract'])
+            validate_inputs(contract_inputs(payload, plan), plan['contract'])
         except ValueError as exc:
             raise AssignmentError(str(exc)) from None
     state, binary = args.state.absolute(), str(args.runtime.resolve())
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
+        if args.profile == PROFILE:
+            info = os.fstat(fd)
+            if info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise AssignmentError('private_state_directory_required')
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -195,7 +216,7 @@ def main(argv=None):
         for flag in ('revision', 'member', 'task'):
             parser.add_argument('--' + flag, required=True)
         parser.add_argument('--backend', required=True, choices=('fixture', 'codex'))
-        parser.add_argument('--profile', default='lab-v1', choices=('lab-v1', 'development-patch-v1', 'review-v1'))
+        parser.add_argument('--profile', default='lab-v1', choices=('lab-v1', 'development-patch-v1', 'review-v1', PROFILE))
     args = parser.parse_args(argv[1:] if reading else argv)
     try:
         if reading:

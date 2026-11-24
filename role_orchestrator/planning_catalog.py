@@ -1,4 +1,5 @@
 """Pinned Git catalog and native planning-team-v1 contract."""
+import os
 import re
 
 from .contracts import IDENTIFIER, MODEL_NAMES, strict_json, supported_route
@@ -49,8 +50,8 @@ def load(lab, revision, team_id, expected=None):
              and fields(binding, 'role_id role_version instruction model effort')
              and key(binding['role_id']) and key(binding['role_version'])
              and text(binding['instruction']) and text(binding['model']) and text(binding['effort'])
-             and binding['model'] in MODEL_NAMES
-             and supported_route(MODEL_NAMES[binding['model']], binding['effort']), 'invalid_binding')
+             and supported_route(MODEL_NAMES.get(binding['model'], binding['model']),
+                                 binding['effort']), 'invalid_binding')
     for goal, approval in team['goals'].items():
         need(key(goal) and fields(approval, 'text uids') and text(approval['text'])
              and isinstance(approval['uids'], list) and bool(approval['uids'])
@@ -59,13 +60,21 @@ def load(lab, revision, team_id, expected=None):
     return sha, team
 
 
-def bound_plan(args, revision, version):
+def bound_plan(args, revision, version, *, context=None):
     team_id, _, step = args.task.partition('--')
     try:
-        need(re.fullmatch(r'[1-9]|[12][0-9]|3[0-2]', step), 'invalid_planning_task')
+        need(IDENTIFIER.fullmatch(args.task) and re.fullmatch(r'[1-9]|[12][0-9]|3[0-2]', step),
+             'invalid_planning_task')
         sha, team = load(args.lab, revision, team_id)
         need(int(step) <= team['max_steps'] and args.member in team['members'], 'invalid_team_route')
         binding = team['members'][args.member]
+        if context is not None:
+            principal = context.get('principal')
+            need(fields(principal, 'team goal') and principal['team'] == team_id
+                 and key(principal['goal']), 'invalid_planning_principal')
+            approval = team['goals'].get(principal['goal'])
+            need(approval is not None and os.getuid() in approval['uids']
+                 and context.get('approved_goal') == approval['text'], 'unapproved_goal_or_user')
     except ValueError as exc:
         raise AssignmentError(str(exc)) from None
     lead = args.member == team['lead']
@@ -78,4 +87,5 @@ def bound_plan(args, revision, version):
     return dict(version=version, revision=revision, backend=args.backend, member_id=args.member,
                 task_id=args.task, handoff_id=binding['role_id'], expected_role_version=binding['role_version'],
                 contract=contract, instruction=contract_instruction(binding['instruction'], contract),
-                desired={'model': MODEL_NAMES[binding['model']], 'effort': binding['effort']})
+                desired={'model': MODEL_NAMES.get(binding['model'], binding['model']),
+                         'effort': binding['effort']})
