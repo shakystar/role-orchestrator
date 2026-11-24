@@ -50,12 +50,12 @@ class PlanningTeamTest(unittest.TestCase):
     def test_reconcile_after_native_before_team_checkpoint(self):
         fixtures = {f'demo--{n}': {'marker': n} for n in (1, 2, 3)}
 
-        def reconcile(args, current, dispatch):
+        def reconcile(args, current, dispatch, *, state_fd):
             self.assertEqual(current['input']['fixture'], fixtures[current['task_id']])
             return self.observation(args, current, dispatch)
 
-        def interrupt(args, current, dispatch):
-            result = reconcile(args, current, dispatch)
+        def interrupt(args, current, dispatch, *, state_fd):
+            result = reconcile(args, current, dispatch, state_fd=state_fd)
             if current['task_id'] == 'demo--2':
                 raise InterruptedError('simulated interruption')  # caught as an uncertain native call
             return result
@@ -104,9 +104,40 @@ class PlanningTeamTest(unittest.TestCase):
         current = {'task_id': 'demo--1'}
         for backend in ('fixture', 'codex'):
             self.args.backend = backend
-            with self.subTest(backend=backend), patch.object(broker, 'invoke') as invoke:
-                broker.native(self.args, current, False)
+            with self.subTest(backend=backend), broker.state_directory(
+                self.args.state, os.getuid()
+            ) as state_fd, patch.object(broker, 'invoke') as invoke:
+                broker.native(self.args, current, False, state_fd=state_fd)
                 command, data = invoke.call_args.args
-                self.assertEqual(command[3:], ['status', '--state', str(self.args.state / 'demo--1'),
-                                               '--runtime', self.args.runtime, '--verify-native-receipt'])
+                self.assertEqual(command, ['role_orchestrator.assignment', 'status', '--state', 'demo--1',
+                                           '--runtime', self.args.runtime, '--verify-native-receipt'])
+                self.assertEqual(invoke.call_args.kwargs, {'state_fd': state_fd})
                 self.assertEqual(data, b'')
+
+    def test_pinned_state_and_child_cwd(self):
+        parent = os.stat('.')
+        root = self.args.state.stat()
+        identity = (root.st_dev, root.st_ino)
+        with TemporaryDirectory() as modules:
+            Path(modules, 'planning_cwd_probe.py').write_text(
+                "import json, os, sys\n"
+                "if len(sys.argv) > 1:\n"
+                "    raise SystemExit(7)\n"
+                "info = os.stat('.')\n"
+                "print(json.dumps({'identity': [info.st_dev, info.st_ino]}))\n",
+                encoding='utf-8',
+            )
+            with patch.dict(os.environ, {'PYTHONPATH': modules}), broker.state_directory(
+                self.args.state, os.getuid()
+            ) as state_fd:
+                info = os.fstat(state_fd)
+                self.assertEqual((info.st_dev, info.st_ino), identity)
+                broker.save(state_fd, {'probe': True})
+                self.assertEqual((self.args.state / 'team.json').read_bytes(),
+                                 canonical({'probe': True}) + b'\n')
+                result = broker.invoke(['planning_cwd_probe'], b'', state_fd=state_fd)
+                self.assertEqual(result, {'returncode': 0, 'value': {'identity': list(identity)}})
+                self.assertTrue(os.path.samestat(parent, os.stat('.')))
+                failed = broker.invoke(['planning_cwd_probe', 'fail'], b'', state_fd=state_fd)
+                self.assertEqual(failed['returncode'], 7)
+                self.assertTrue(os.path.samestat(parent, os.stat('.')))

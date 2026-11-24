@@ -1,9 +1,11 @@
 """Bounded planning broker; native Assignment owns execution and receipts."""
 import argparse
+from contextlib import contextmanager
 import fcntl
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -61,23 +63,47 @@ def decision(value, messages, available, links, remaining):
     return action
 
 
-def save(path, state):
-    temp = path.with_suffix('.tmp')
-    with temp.open('wb') as handle:
+@contextmanager
+def state_directory(path, uid):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        need(stat.S_ISDIR(info.st_mode) and info.st_uid == uid
+             and not info.st_mode & 0o077, 'private_state_directory_required')
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def save(state_fd, state):
+    fd = os.open('team.tmp', os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                 0o600, dir_fd=state_fd)
+    with os.fdopen(fd, 'wb') as handle:
         handle.write(canonical(state) + b'\n')
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(temp, path)
-    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    os.replace('team.tmp', 'team.json', src_dir_fd=state_fd, dst_dir_fd=state_fd)
+    os.fsync(state_fd)
 
 
-def invoke(command, data):
+# Change directory only in the child, after Python startup in the original cwd.
+_PINNED_MODULE = (
+    "import os, runpy, sys\n"
+    "fd = int(sys.argv.pop(1))\n"
+    "module = sys.argv.pop(1)\n"
+    "if sys.path and sys.path[0] == '':\n"
+    "    sys.path[0] = os.getcwd()\n"
+    "os.fchdir(fd)\n"
+    "os.close(fd)\n"
+    "runpy.run_module(module, run_name='__main__', alter_sys=True)\n"
+)
+
+
+def invoke(command, data, *, state_fd):
+    argv = [sys.executable, '-c', _PINNED_MODULE, str(state_fd), *command]
     try:
-        result = subprocess.run(command, input=data, capture_output=True, timeout=600, check=False)
+        result = subprocess.run(argv, input=data, capture_output=True, timeout=600,
+                                check=False, pass_fds=(state_fd,))
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {'error': type(exc).__name__}
     answer = {'returncode': result.returncode}
@@ -90,17 +116,17 @@ def invoke(command, data):
     return answer
 
 
-def native(args, current, dispatch):
-    directory = args.state / current['task_id']
-    command = [sys.executable, '-m', 'role_orchestrator.assignment']
+def native(args, current, dispatch, *, state_fd):
+    directory = current['task_id']
+    command = ['role_orchestrator.assignment']
     if dispatch:
-        directory.mkdir(mode=0o700)
+        os.mkdir(directory, mode=0o700, dir_fd=state_fd)
         invoke(command + ['--lab', args.lab, '--revision', args.revision, '--runtime', args.runtime,
-                         '--state', str(directory), '--backend', args.backend, '--task', current['task_id'],
+                         '--state', directory, '--backend', args.backend, '--task', current['task_id'],
                          '--member', current['member_id'], '--profile', PROFILE],
-               canonical(current['input']) + b'\n')
-    return invoke(command + ['status', '--state', str(directory), '--runtime', args.runtime,
-                             '--verify-native-receipt'], b'')
+               canonical(current['input']) + b'\n', state_fd=state_fd)
+    return invoke(command + ['status', '--state', directory, '--runtime', args.runtime,
+                             '--verify-native-receipt'], b'', state_fd=state_fd)
 
 
 def link(args, current, observation):
@@ -127,13 +153,13 @@ def link(args, current, observation):
                 evidence_kind='fixture' if args.backend == 'fixture' else 'native-verified-codex')
 
 
-def advance(args, path, state, team):
+def advance(args, state_fd, state, team):
     while state['branch'] is None:
         fresh = state['pending'] is None
         if fresh:
             if state['count'] >= team['max_steps']:
                 state['branch'] = {'action': 'hold', 'reason': 'step_budget_exhausted', 'terminal': True}
-                save(path, state)
+                save(state_fd, state)
                 break
             task_id = f"{args.team}--{state['count'] + 1}"
             fixtures = state.get('fixtures')
@@ -155,10 +181,10 @@ def advance(args, path, state, team):
                 work_input['fixture'] = fixtures[task_id]
             state['pending'] = dict(member_id=item['member_id'], input=work_input,
                                     task_id=task_id, lead=lead)
-            save(path, state)  # The only path that can dispatch is after this durable intent.
+            save(state_fd, state)  # The only path that can dispatch is after this durable intent.
         current = state['pending']
         try:
-            observed = native(args, current, fresh)
+            observed = native(args, current, fresh, state_fd=state_fd)
         except OSError as exc:
             observed = {'error': type(exc).__name__}
         try:
@@ -186,7 +212,7 @@ def advance(args, path, state, team):
             else:
                 state['links'][current['task_id']] = receipt
                 state['used'].append(current['member_id'])
-        save(path, state)
+        save(state_fd, state)
     branch = state['branch']
     return dict(branch=branch, principal=state['principal'], backend=args.backend,
                 artifacts=state['links'], lead_receipts=[row for row in state['journal']
@@ -201,15 +227,17 @@ def run(args, incoming):
     principal = {'team': args.team, 'goal': args.goal}
     pin = dict(catalog_sha256=sha, revision=args.revision, backend=args.backend, uid=uid,
                lab=args.lab, runtime=args.runtime, profile=PROFILE)
-    root = args.state
-    stat = root.stat()
-    need(root.is_dir() and not root.is_symlink() and stat.st_uid == uid
-         and not stat.st_mode & 0o077, 'private_state_directory_required')
-    path = root / 'team.json'
-    with (root / '.lock').open('a') as lock:
+    with state_directory(args.state, uid) as state_fd, os.fdopen(
+        os.open('.lock', os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=state_fd), 'wb'
+    ) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if path.exists():
-            state = strict_json(path.read_text(encoding='utf-8'))
+        try:
+            checkpoint = os.open('team.json', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=state_fd)
+        except FileNotFoundError:
+            checkpoint = None
+        if checkpoint is not None:
+            with os.fdopen(checkpoint, encoding='utf-8') as handle:
+                state = strict_json(handle.read())
             need(state['pin'] == pin and state['principal'] == principal
                  and state['goal'] == approval['text'], 'checkpoint_pin_mismatch')
             if incoming is not None:
@@ -220,9 +248,9 @@ def run(args, incoming):
                      and not branch.get('terminal'), 'answer_not_expected')
                 state['messages'].append(incoming['answer'])
                 state['branch'] = None
-                save(path, state)
+                save(state_fd, state)
         else:
-            need(not (set(p.name for p in root.iterdir()) - {'.lock', 'team.tmp'}), 'unrecognized_state')
+            need(not (set(os.listdir(state_fd)) - {'.lock', 'team.tmp'}), 'unrecognized_state')
             with_fixtures = isinstance(incoming, dict) and 'fixtures' in incoming
             need(fields(incoming, 'request fixtures' if with_fixtures else 'request')
                  and text(incoming['request']), 'request_required')
@@ -235,8 +263,8 @@ def run(args, incoming):
             state = dict(pin=pin, principal=principal, goal=approval['text'], messages=[incoming['request']],
                          count=0, pending=None, branch=None, queue=[], used=[], journal=[], links={},
                          fixtures=fixtures)
-            save(path, state)
-        return advance(args, path, state, team)
+            save(state_fd, state)
+        return advance(args, state_fd, state, team)
 
 
 def main():
