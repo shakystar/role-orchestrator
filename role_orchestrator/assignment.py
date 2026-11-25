@@ -10,7 +10,7 @@ import sys
 import tempfile
 
 from .contracts import IDENTIFIER as ID, attempt_id, strict_json
-from .attempts import AttemptReader, terminal_failure
+from .attempts import AttemptReader, ConfirmedAssignmentMismatch, terminal_failure
 from .role_contracts import canonical, digest, output_payload, validate_inputs
 from .planning_catalog import PROFILE, bound_plan
 from .roster import AssignmentError, make_plan
@@ -83,6 +83,8 @@ def observe(binary, state, ids, plan, request=None):
             return dict(status='uncertain', reason='attempt_receipt_absent')
         receipt, receipt_hash = proof
         failure = terminal_failure(receipt)
+    except ConfirmedAssignmentMismatch:
+        return dict(status='failed', reason='assignment_mismatch')
     except (ValueError, TypeError, KeyError, OSError, AttributeError, RecursionError,
             subprocess.SubprocessError):
         return dict(status='uncertain', reason='attempt_evidence_unavailable_or_invalid')

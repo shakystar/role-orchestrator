@@ -23,6 +23,10 @@ def require_capabilities(binary):
         raise ValueError('runtime-bridge lacks required v1 interfaces')
 
 
+class ConfirmedAssignmentMismatch(ValueError):
+    """The observed wire and receipt agree on a different task ID."""
+
+
 class AttemptReader:
     def __init__(self, binary, state, run_id):
         self.binary = binary
@@ -53,8 +57,13 @@ class AttemptReader:
             raise ValueError('invalid_receipt_envelope')
         if (type(wire.get('schema_version')) is not int or wire['schema_version'] != 1
                 or wire.get('run_id') != self.run_id or wire.get('attempt_id') != attempt
-                or any(wire.get(key) != value for key, value in request.items())
+                or any(wire.get(key) != value for key, value in request.items() if key != 'id')
                 or not isinstance(wire.get('input'), str)):
+            raise ValueError('wire_request_mismatch')
+        expected_id, observed_id = request.get('id'), wire.get('id')
+        id_mismatch = 'id' in request and observed_id != expected_id
+        if id_mismatch and not all(isinstance(value, str) and value.strip()
+                                   for value in (observed_id, expected_id)):
             raise ValueError('wire_request_mismatch')
         if input_sha256 is not None and hashlib.sha256(wire['input'].encode()).hexdigest() != input_sha256:
             raise ValueError('wire_input_mismatch')
@@ -64,6 +73,11 @@ class AttemptReader:
                 or receipt.get('run_id', self.run_id) != self.run_id
                 or receipt.get('attempt_id', attempt) != attempt):
             raise ValueError('receipt_task_mismatch')
+        if id_mismatch:
+            status = receipt.get('status')
+            if not isinstance(status, str) or not status.strip():
+                raise ValueError('invalid_receipt_envelope')
+            raise ConfirmedAssignmentMismatch('assignment_mismatch')
         return receipt, hashlib.sha256(receipt_bytes).hexdigest()
 
 
