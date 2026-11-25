@@ -109,7 +109,8 @@ def observe(binary, state, ids, plan, request=None):
             output_sha256=digest(result['text'].encode()),
             contract_sha256=contract['sha256'], input_sha256=digest(receipt['task']['input'].encode()),
             receipt_sha256=receipt_hash, member_id=plan['member_id'], task_id=plan['task_id'], **ids)
-    if 'turn_evidence' in result:
+    turn_id = result.get('turn_id')
+    if turn_id is not None:
         output_sha256 = None
         text = result.get('text')
         if isinstance(text, str):
@@ -117,8 +118,12 @@ def observe(binary, state, ids, plan, request=None):
                 output_sha256 = digest(text.encode())
             except UnicodeError:
                 pass  # Optional evidence must not change the native verdict.
+        turn = dict(session=result.get('session'), turn_id=turn_id, completed=True,
+                    assignment_id=plan['task_id'], role_version=verdict['actual_role_version'],
+                    output_sha256=output_sha256, usage=result.get('turn_usage'),
+                    usage_scope='final_matched_tokenUsage.last')
         verdict['turn_evidence'] = dict(assignment_id=plan['task_id'],
-                                       output_sha256=output_sha256, turn=result['turn_evidence'])
+                                       output_sha256=output_sha256, turn=turn)
     return verdict
 
 
