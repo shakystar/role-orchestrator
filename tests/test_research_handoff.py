@@ -27,7 +27,7 @@ class ResearchHandoffTest(unittest.TestCase):
             ({k: v for k, v in valid.items() if k != 'conflict'}, 'invalid_or_conflicted_review'),
             (dict(valid, opinions=[]), 'invalid_or_conflicted_review'),
             (dict(valid, opinions={'bad': {}}), 'invalid_opinion'),
-            (dict(valid, conflict=False), 'incomplete_review'),
+            (dict(valid, conflict=False), 'invalid_or_conflicted_review'),
         )
         args = SimpleNamespace(one_step=False)
         member, task_id = 'acl-025', f'{r.TEAM}--{r.STEPS["review"]}'

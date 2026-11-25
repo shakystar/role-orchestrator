@@ -162,7 +162,11 @@ def apply(phase, value, state, receipts):
     if phase == 'review':
         value = project(value, 'draft_sha256 conflict opinions', 'invalid_or_conflicted_review')
         need(type(value['conflict']) is bool
-             and value['draft_sha256'] == data['draft_sha256'] and mapping(value['opinions']),
+             and value['draft_sha256'] == data['draft_sha256']
+             and (mapping(value['opinions'])
+                  or (value['conflict'] is True
+                      and isinstance(value['opinions'], dict)
+                      and not value['opinions'])),
              'invalid_or_conflicted_review')
         claims = data['draft']['claims']
         covered = set()
