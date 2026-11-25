@@ -75,7 +75,7 @@ class AttemptReader:
             raise ValueError('receipt_task_mismatch')
         if id_mismatch:
             status = receipt.get('status')
-            if not isinstance(status, str) or not status.strip():
+            if status not in ('succeeded', 'failed'):
                 raise ValueError('invalid_receipt_envelope')
             raise ConfirmedAssignmentMismatch('assignment_mismatch')
         return receipt, hashlib.sha256(receipt_bytes).hexdigest()

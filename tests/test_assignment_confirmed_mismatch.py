@@ -43,6 +43,8 @@ class AssignmentMismatchTests(unittest.TestCase):
             'wrong input': self.evidence({'input': '{"different":true}'}),
             'inconsistent receipt': self.evidence(receipt_changes={'task': {}}),
             'invalid receipt status': self.evidence(receipt_changes={'status': None}),
+            'unsupported receipt status': self.evidence(receipt_changes={'status': 'bogus'}),
+            'unfinalized receipt status': self.evidence(receipt_changes={'status': 'running'}),
             'malformed receipt': (self.evidence()[0], b'{'),
         }
         for label, evidence in cases.items():
