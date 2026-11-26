@@ -29,6 +29,10 @@ def fields(value, names):
     return isinstance(value, dict) and set(value) == set(names.split())
 
 
+def _resolve_catalog_model(model):
+    return MODEL_NAMES.get(model, model)
+
+
 def load(lab, revision, team_id, expected=None):
     need(re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', revision), 'full_commit_sha_required')
     need(git(lab, 'rev-parse', '--verify', revision + '^{commit}').strip() == revision,
@@ -52,7 +56,7 @@ def load(lab, revision, team_id, expected=None):
              and fields(binding, 'role_id role_version instruction model effort')
              and key(binding['role_id']) and key(binding['role_version'])
              and text(binding['instruction']) and text(binding['model']) and text(binding['effort'])
-             and supported_route(MODEL_NAMES.get(binding['model'], binding['model']),
+             and supported_route(_resolve_catalog_model(binding['model']),
                                  binding['effort']), 'invalid_binding')
     for goal, approval in team['goals'].items():
         need(key(goal) and fields(approval, 'text uids') and text(approval['text'])
@@ -89,5 +93,5 @@ def bound_plan(args, revision, version, *, context=None):
     return dict(version=version, revision=revision, backend=args.backend, member_id=args.member,
                 task_id=args.task, handoff_id=binding['role_id'], expected_role_version=binding['role_version'],
                 contract=contract, instruction=contract_instruction(binding['instruction'], contract),
-                desired={'model': MODEL_NAMES.get(binding['model'], binding['model']),
+                desired={'model': _resolve_catalog_model(binding['model']),
                          'effort': binding['effort']})

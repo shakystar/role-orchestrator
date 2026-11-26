@@ -9,6 +9,34 @@ from role_orchestrator import planning_catalog as catalog, planning_team as brok
 from role_orchestrator.role_contracts import canonical, digest
 
 
+class PlanningCatalogTest(unittest.TestCase):
+    def _plan(self, *, model='gpt-6-luna', unused=None):
+        revision = 'a' * 40
+        route = dict(role_id='planner', role_version='v1', instruction='Use supplied evidence.',
+                     model=model, effort='high')
+        approval = {'uids': [os.getuid()], 'text': 'Draft a plan'}
+        raw = canonical({'version': 1, 'teams': {'demo': {
+            'lead': 'lead', 'members': {'lead': route,
+                                        'expert': dict(route, role_id='specialist', **(unused or {}))},
+            'goals': {'draft': approval}, 'max_steps': 3}}})
+        args = SimpleNamespace(task='demo--1', member='lead', lab='/fake/lab', backend='fixture')
+        context = {'principal': {'team': 'demo', 'goal': 'draft'}, 'approved_goal': approval['text']}
+        with patch.object(catalog, 'git', side_effect=[revision, raw.decode()]):
+            return catalog.bound_plan(args, revision, 2, context=context)
+
+    def test_catalog_resolves_alias_and_accepts_canonical_luna_high(self):
+        for model, expected in (('Sol', 'gpt-6.2-sol'), ('gpt-6-luna', 'gpt-6-luna')):
+            with self.subTest(model=model):
+                plan = self._plan(model=model)
+                self.assertEqual(plan['desired'], {'model': expected, 'effort': 'high'})
+
+    def test_invalid_unused_binding_rejects_selected_route(self):
+        for unused in ({'model': 'unknown'}, {'effort': 'medium'}, {'model': []}, {'effort': {}}):
+            with self.subTest(unused=unused):
+                with self.assertRaisesRegex(catalog.AssignmentError, '^invalid_binding$'):
+                    self._plan(unused=unused)
+
+
 class PlanningTeamTest(unittest.TestCase):
     def setUp(self):
         tmp = TemporaryDirectory()

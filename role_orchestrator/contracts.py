@@ -12,6 +12,8 @@ MODEL_NAMES = {'Sol': 'gpt-6.2-sol', 'Astra': 'gpt-6.2-astra'}
 
 
 def supported_route(model, effort):
+    if model == 'gpt-6-luna':
+        return effort == 'high'
     return model in MODEL_NAMES.values() and effort in ('low', 'medium', 'high')
 
 
