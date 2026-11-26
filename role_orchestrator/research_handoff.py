@@ -161,8 +161,12 @@ def apply(phase, value, state, receipts):
         return {'draft': draft, 'draft_sha256': digest(canonical(draft))}, None
     if phase == 'review':
         value = project(value, 'draft_sha256 conflict opinions', 'invalid_or_conflicted_review')
-        need(value['conflict'] is False
-             and value['draft_sha256'] == data['draft_sha256'] and mapping(value['opinions']),
+        need(type(value['conflict']) is bool
+             and value['draft_sha256'] == data['draft_sha256']
+             and (mapping(value['opinions'])
+                  or (value['conflict'] is True
+                      and isinstance(value['opinions'], dict)
+                      and not value['opinions'])),
              'invalid_or_conflicted_review')
         claims = data['draft']['claims']
         covered = set()
@@ -175,8 +179,11 @@ def apply(phase, value, state, receipts):
             opinion['missing'] = dependency_records(opinion['missing'], evidence)
             opinions[oid] = opinion
             covered.add(opinion['claim'])
-        need(covered == claims.keys(), 'incomplete_review')
         value['opinions'] = opinions
+        if value['conflict'] is True:
+            # A conflict report is not a completed substantive review.
+            return {'review': value}, dict(action='reassign', reason='reviewer_conflict', phase=phase)
+        need(covered == claims.keys(), 'incomplete_review')
         return {'review': value}, None
     if phase == 'synthesize':
         opinions = data['review']['opinions']

@@ -10,7 +10,7 @@ import sys
 import tempfile
 
 from .contracts import IDENTIFIER as ID, attempt_id, strict_json
-from .attempts import AttemptReader, terminal_failure
+from .attempts import AttemptReader, ConfirmedAssignmentMismatch, terminal_failure
 from .role_contracts import canonical, digest, output_payload, validate_inputs
 from .planning_catalog import PROFILE, bound_plan
 from .roster import AssignmentError, make_plan
@@ -83,6 +83,8 @@ def observe(binary, state, ids, plan, request=None):
             return dict(status='uncertain', reason='attempt_receipt_absent')
         receipt, receipt_hash = proof
         failure = terminal_failure(receipt)
+    except ConfirmedAssignmentMismatch:
+        return dict(status='failed', reason='assignment_mismatch')
     except (ValueError, TypeError, KeyError, OSError, AttributeError, RecursionError,
             subprocess.SubprocessError):
         return dict(status='uncertain', reason='attempt_evidence_unavailable_or_invalid')
@@ -109,6 +111,21 @@ def observe(binary, state, ids, plan, request=None):
             output_sha256=digest(result['text'].encode()),
             contract_sha256=contract['sha256'], input_sha256=digest(receipt['task']['input'].encode()),
             receipt_sha256=receipt_hash, member_id=plan['member_id'], task_id=plan['task_id'], **ids)
+    turn_id = result.get('turn_id')
+    if turn_id is not None:
+        output_sha256 = None
+        text = result.get('text')
+        if isinstance(text, str):
+            try:
+                output_sha256 = digest(text.encode())
+            except UnicodeError:
+                pass  # Optional evidence must not change the native verdict.
+        turn = dict(session=result.get('session'), turn_id=turn_id, completed=True,
+                    assignment_id=plan['task_id'], role_version=verdict['actual_role_version'],
+                    output_sha256=output_sha256, usage=result.get('turn_usage'),
+                    usage_scope='final_matched_tokenUsage.last')
+        verdict['turn_evidence'] = dict(assignment_id=plan['task_id'],
+                                       output_sha256=output_sha256, turn=turn)
     return verdict
 
 
