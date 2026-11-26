@@ -95,6 +95,8 @@ def verify_m1(observations, *, assignment_id, member_id, role_version):
                     scope == _NATIVE_USAGE_SCOPE and usage.keys() != _NATIVE_USAGE_FIELDS)):
             errors.add('invalid_turn_usage')
             continue
+        if scope is None and usage == {}:
+            usage = None
         record = output, scope, None if usage is None else dict(usage)
         previous = completed.get(key)
         if previous is None:

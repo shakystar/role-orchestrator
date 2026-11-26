@@ -34,6 +34,53 @@ class M1EvidenceTests(unittest.TestCase):
         self.assertEqual((result['status'], result['turn_count']), ('verified', 1))
         self.assertEqual(result['usage'], {'tokens': 7})
 
+    def test_empty_unscoped_usage_is_unknown_across_checkpoint(self):
+        first = observation()
+        first['turn_evidence']['turn']['usage'] = {}
+        checkpoint = json.loads(json.dumps([first]))
+        before = check(first)
+        self.assertEqual(check(*checkpoint), before)
+        self.assertEqual((before['status'], before['action'], before['turn_count']),
+                         ('uncertain', 'hold', 1))
+        self.assertEqual(before['reasons'], ['incomplete_turn_usage'])
+        self.assertEqual(before['usage'], {})
+        self.assertIs(before['usage_complete'], False)
+        known = observation()
+        known['receipt_sha256'] = 'c' * 64
+        self.assertEqual(check(*checkpoint, known), check(known))
+        self.assertEqual(check(known, *checkpoint), check(known))
+
+    def test_empty_usage_still_rejects_malformed_inputs(self):
+        from role_orchestrator.m1_evidence import _NATIVE_USAGE_SCOPE
+
+        for scope, usage in ((None, []), (_NATIVE_USAGE_SCOPE, {})):
+            with self.subTest(scope=scope, usage=usage):
+                item = observation()
+                turn = item['turn_evidence']['turn']
+                turn['usage'] = usage
+                if scope is not None:
+                    turn['usage_scope'] = scope
+                restored = json.loads(json.dumps(item))
+                result = check(item)
+                self.assertEqual(check(restored), result)
+                self.assertEqual((result['status'], result['action']), ('failed', 'reject'))
+                self.assertIn('invalid_turn_usage', result['reasons'])
+
+    def test_native_all_zero_usage_remains_known_across_checkpoint(self):
+        from role_orchestrator.m1_evidence import _NATIVE_USAGE_FIELDS, _NATIVE_USAGE_SCOPE
+
+        item = observation()
+        turn = item['turn_evidence']['turn']
+        counts = {name: 0 for name in _NATIVE_USAGE_FIELDS}
+        turn.update(usage_scope=_NATIVE_USAGE_SCOPE, usage=counts)
+        result = check(item)
+        self.assertEqual(check(json.loads(json.dumps(item))), result)
+        self.assertEqual((result['status'], result['action'], result['turn_count']),
+                         ('verified', 'accept', 1))
+        self.assertEqual(result['usage'], counts)
+        self.assertIs(result['usage_complete'], True)
+        self.assertEqual(result['usage_scope'], _NATIVE_USAGE_SCOPE)
+
     def test_distinct_turns_with_identical_output_count_twice(self):
         for other in (observation(turn_id='t2'), observation(session='s2')):
             with self.subTest(other=other['turn_evidence']['turn']):
